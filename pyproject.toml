@@ -1,0 +1,7 @@
+[project]
+name = "pebble"
+version = "0.1.0"
+description = "A small Redis-compatible server, written from scratch"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
