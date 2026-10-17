@@ -41,7 +41,8 @@ flowchart LR
 
 ```
 src/
-  server.ts         opens the port, creates a Connection per client
+  main.ts           starts the server on port 6380
+  server.ts         creates the TCP server, one Connection per client
   connection.ts     leftovers buffer + parse/run/reply loop
   resp/parser.ts    bytes → ["SET", "name", "Jahnavi"]
   resp/encoder.ts   "OK" → "+OK\r\n"

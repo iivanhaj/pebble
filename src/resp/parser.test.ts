@@ -54,6 +54,6 @@ test("throws ProtocolError on input that isn't a RESP array", () => {
   assert.throws(() => parse(bytes("*1\r\n$abc\r\n")), ProtocolError);
 });
 
-test("throws ProtocolError when a word isn't followed by \r\n", () => {
+test("throws ProtocolError when a word isn't followed by \\r\\n", () => {
   assert.throws(() => parse(bytes("*1\r\n$4\r\nPINGxx")), ProtocolError);
 });
