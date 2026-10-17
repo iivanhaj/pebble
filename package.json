@@ -9,7 +9,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "tsc && node --test \"dist/**/*.test.js\""
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
