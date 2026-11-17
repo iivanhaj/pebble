@@ -35,7 +35,19 @@ flowchart LR
 3. **The command table is a plain object** mapping a command name to a function.
    Unknown names reply with an error.
 4. **Expiry times live in a second Map** (`key → expires-at timestamp`), next to
-   the notebook. Keys with no timeout are not in it.
+   the notebook. Keys with no timeout are not in it. The same keys are also kept
+   in an array, so active expiry can pick a random one in O(1); removing a key
+   swaps the last one into its slot.
+
+## Expiry
+
+Like Redis, expired keys are removed two ways:
+
+- **Lazily:** every read of a key checks its timeout first and deletes it if
+  it has passed. Cheap, but a key nobody reads again would stay forever.
+- **Actively:** 10 times a second, sample 20 random keys that have a timeout
+  and delete the expired ones. If more than a quarter of the sample had
+  expired, sample again right away (up to a 25 ms time budget).
 
 ## Files (week 1)
 
@@ -47,8 +59,8 @@ src/
   resp/parser.ts    bytes → ["SET", "name", "Jahnavi"]
   resp/encoder.ts   "OK" → "+OK\r\n"
   commands.ts       the command table
-  store.ts          the notebook Map (+ expiry Map later)
+  store.ts          the notebook Map, expiry times, lazy + active expiry
 ```
 
-Later milestones (expiry, LRU eviction, AOF, snapshots, pub/sub, transactions)
+Later milestones (LRU eviction, AOF, snapshots, pub/sub, transactions)
 add new files beside these without changing their shape.
