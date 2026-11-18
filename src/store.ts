@@ -96,6 +96,14 @@ export function activeExpireCycle(): number {
   return deleted;
 }
 
+// ---- For snapshots ----
+
+// Every key with its value and expiry time (undefined if none). Doesn't check
+// expiry: a snapshot saves exactly what's in memory.
+export function* entries(): Generator<[string, Value, number | undefined]> {
+  for (const [key, value] of values) yield [key, value, expires.get(key)?.at];
+}
+
 // ---- Counts (for INFO and tests) ----
 
 // Counts keys without checking expiry, like Redis's DBSIZE: expired keys that
