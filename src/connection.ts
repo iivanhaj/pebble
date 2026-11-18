@@ -1,7 +1,7 @@
 import type { Socket } from "node:net";
 import { parse, ProtocolError } from "./resp/parser.js";
 import { encode } from "./resp/encoder.js";
-import { runCommand } from "./commands.js";
+import { runCommand } from "./commands/index.js";
 
 // One per client. Keeps the bytes that haven't made a whole command yet, and
 // runs every whole command as soon as it has arrived.

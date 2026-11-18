@@ -1,6 +1,6 @@
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { runCommand } from "./commands.js";
+import { runCommand } from "./commands/index.js";
 import * as store from "./store.js";
 
 beforeEach(() => store.clear());

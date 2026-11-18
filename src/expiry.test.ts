@@ -2,7 +2,7 @@
 // forward in time instantly instead of the test actually waiting.
 import { test, beforeEach, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { runCommand as run } from "./commands.js";
+import { runCommand as run } from "./commands/index.js";
 import * as store from "./store.js";
 
 beforeEach(() => store.clear());

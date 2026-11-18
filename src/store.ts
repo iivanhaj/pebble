@@ -1,3 +1,5 @@
+import { Deque } from "./deque.js";
+
 // The notebook: every key and its value, plus expiry times for keys that have one.
 //
 // Expired keys are removed two ways, like Redis:
@@ -5,7 +7,10 @@
 //   - actively: activeExpireCycle() samples random keys with a timeout, so keys
 //     nobody reads again still get cleaned up
 
-const values = new Map<string, string>();
+// What a key can hold: a string, a list, a hash (field -> value) or a set.
+export type Value = string | Deque<string> | Map<string, string> | Set<string>;
+
+const values = new Map<string, Value>();
 
 // Only keys with a timeout are in here. `slot` is the key's index in ttlKeys.
 const expires = new Map<string, { at: number; slot: number }>();
@@ -16,7 +21,7 @@ const ttlKeys: string[] = [];
 
 // ---- Reads and writes (all go through expireIfNeeded) ----
 
-export function get(key: string): string | undefined {
+export function get(key: string): Value | undefined {
   expireIfNeeded(key);
   return values.get(key);
 }
@@ -28,7 +33,7 @@ export function has(key: string): boolean {
 
 // Like Redis, a plain SET throws away any old timeout. Commands that change a
 // value in place (INCR, DECR) pass keepTtl so the timeout survives.
-export function set(key: string, value: string, { keepTtl = false } = {}): void {
+export function set(key: string, value: Value, { keepTtl = false } = {}): void {
   values.set(key, value);
   if (!keepTtl) forgetExpiry(key);
 }

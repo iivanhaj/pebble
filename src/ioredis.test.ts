@@ -84,3 +84,30 @@ test("a pipeline sends many commands in one write", async () => {
   assert.deepEqual(results!.at(-1), [null, 1000]);
   assert.equal(await redis.get("counter"), "1000");
 });
+
+test("lists", async () => {
+  assert.equal(await redis.rpush("queue", "a", "b", "c"), 3);
+  assert.equal(await redis.lpush("queue", "z"), 4);
+  assert.deepEqual(await redis.lrange("queue", 0, -1), ["z", "a", "b", "c"]);
+  assert.equal(await redis.lpop("queue"), "z");
+  assert.equal(await redis.rpop("queue"), "c");
+});
+
+test("hashes, using ioredis's object helpers", async () => {
+  assert.equal(await redis.hset("user:1", { name: "Jahnavi", lang: "TypeScript" }), 2);
+  assert.equal(await redis.hget("user:1", "name"), "Jahnavi");
+  assert.deepEqual(await redis.hgetall("user:1"), { name: "Jahnavi", lang: "TypeScript" });
+  assert.equal(await redis.hdel("user:1", "lang"), 1);
+});
+
+test("sets", async () => {
+  assert.equal(await redis.sadd("tags", "redis", "node", "redis"), 2);
+  assert.deepEqual((await redis.smembers("tags")).sort(), ["node", "redis"]);
+  assert.equal(await redis.sismember("tags", "node"), 1);
+  assert.equal(await redis.srem("tags", "node"), 1);
+});
+
+test("WRONGTYPE comes back as a rejected promise", async () => {
+  await redis.rpush("queue", "a");
+  await assert.rejects(redis.get("queue"), /^ReplyError: WRONGTYPE/);
+});
