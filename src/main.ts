@@ -1,11 +1,22 @@
+import path from "node:path";
 import { createServer } from "./server.js";
 import { activeExpireCycle } from "./store.js";
+import { onWrite } from "./commands/index.js";
+import { parseArgs } from "./config.js";
+import { AofWriter } from "./persistence/aof.js";
 
 const HOST = "127.0.0.1";
-const PORT = 6380;
+const config = parseArgs(process.argv.slice(2));
 
-createServer().listen(PORT, HOST, () => {
-  console.log(`Pebble listening on ${HOST}:${PORT}`);
+if (config.appendonly) {
+  const aofPath = path.join(config.dir, config.appendfilename);
+  const aof = new AofWriter(aofPath);
+  onWrite((commands) => aof.append(commands));
+  console.log(`Recording writes to ${aofPath}`);
+}
+
+createServer().listen(config.port, HOST, () => {
+  console.log(`Pebble listening on ${HOST}:${config.port}`);
 });
 
 // Clean up expired keys nobody reads anymore, 10 times a second (Redis's default "hz 10").
