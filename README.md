@@ -21,7 +21,8 @@ npm start          # listens on 127.0.0.1:6380
 ```
 
 To keep data across restarts, turn on the append-only file (settings are
-named like Redis's):
+named like Redis's). `SAVE` also writes a snapshot of everything to
+`dump.pebble`, which is loaded on startup:
 
 ```bash
 npm start -- --appendonly yes --appendfsync everysec
@@ -53,7 +54,7 @@ OK
 
 | Group      | Commands                                                      |
 |------------|---------------------------------------------------------------|
-| Connection | `PING`, `ECHO`, `INFO`                                        |
+| Server     | `PING`, `ECHO`, `INFO`, `DBSIZE`, `SAVE`, `LASTSAVE`          |
 | Keys       | `DEL`, `EXISTS`, `EXPIRE`, `PEXPIREAT`, `TTL`, `PERSIST`      |
 | Strings    | `GET`, `SET` (with `EX`, `PX`, `NX`, `XX`), `INCR`, `DECR`, `MGET`, `MSET` |
 | Lists      | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE`                    |
@@ -89,6 +90,11 @@ flowchart LR
   stored as absolute times so they keep counting down across restarts, and a
   crash test kills a real server mid-write to check no acknowledged write is
   ever lost.
+- **Snapshots.** `SAVE` writes the whole store to a compact binary file with a
+  checksum, atomically (temp file, fsync, rename). On startup Pebble loads the
+  snapshot, then replays only the part of the AOF written after it. Measured
+  cost: `SAVE` pauses the server ~1.3 s at 1M keys, since Node can't `fork()`
+  the way Redis does for background saves.
 
 More detail, including the design decisions, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -99,7 +105,7 @@ More detail, including the design decisions, is in
 npm test
 ```
 
-109 tests: unit tests for the parser, encoder and every command; end-to-end
+123 tests: unit tests for the parser, encoder and every command; end-to-end
 tests over a real TCP connection (including a command split across packets);
 tests that drive Pebble with the real `ioredis` client; and a crash test that
 `kill -9`s a running server under load and restarts it. They run on every push
@@ -112,7 +118,8 @@ in GitHub Actions.
 - [x] Key expiry: lazy and active
 - [x] Lists, hashes and sets
 - [x] Persistence: append-only file with `always` / `everysec` / `no` fsync policies
-- [ ] Point-in-time snapshots
+- [x] Point-in-time snapshots (`SAVE`), loaded together with the AOF
+- [ ] Non-blocking snapshots, without `fork()`
 - [ ] Memory limit with LRU eviction (exact LRU, then Redis-style sampled LRU)
 - [ ] Pub/sub
 - [ ] Transactions: `MULTI` / `EXEC` / `WATCH`

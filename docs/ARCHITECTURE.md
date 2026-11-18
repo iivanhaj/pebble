@@ -111,11 +111,57 @@ already in the OS's memory and still reach the disk. `crash.test.ts` checks
 this: it kills a real Pebble process mid-stream and verifies every write the
 client got a reply for survives the restart.
 
+## Persistence: snapshots
+
+The AOF never loses anything, but it grows forever and replaying it gets
+slower. A snapshot is the whole store saved to one compact file at one moment
+(`SAVE`, written to `dump.pebble`).
+
+**Format.** Pebble's own binary format, not Redis's RDB: a `PEBBLE01` header,
+one record per key (type, absolute expiry time, key, value), an end marker,
+and a CRC32 checksum over everything. A damaged or cut-off file is refused at
+startup rather than loaded wrong.
+
+**Atomic save.** The snapshot is written to `dump.pebble.tmp`, fsynced, then
+renamed over `dump.pebble`. A rename replaces the file in one step, so a crash
+at any moment leaves the old snapshot or the new one, never half of one.
+
+**Startup order** (`persistence/startup.ts`):
+
+1. Load the snapshot, if there is one.
+2. Replay the AOF from where the snapshot left off. Each snapshot records the
+   AOF's size when it was taken; everything before that is already in it.
+   Replaying it again would apply `INCR`s twice.
+3. Start recording to the AOF and register what `SAVE` does.
+
+Edge cases: a snapshot taken while the AOF was off has no AOF position, so if
+an AOF exists it wins (it has every write), like Redis. If the AOF is new but
+data came from a snapshot, a fresh snapshot pointing at the empty AOF is saved
+right away. An AOF shorter than the snapshot expects refuses to start.
+
+**Why `SAVE` blocks, and what it costs.** Real Redis's `BGSAVE` calls
+`fork()`: the child process gets a frozen copy of memory for free (the OS
+copies pages only when the parent changes them) and writes it out while the
+parent keeps serving clients. Node can't fork like that, so `SAVE` runs on the
+main thread and every client waits. Measured on a laptop:
+
+| Keys      | `SAVE` blocks for | Load at startup | File size |
+|-----------|-------------------|-----------------|-----------|
+| 10,000    | ~0.1 s            | ~0.02 s         | 0.5 MB    |
+| 100,000   | ~0.2 s            | ~0.1 s          | 5.4 MB    |
+| 1,000,000 | ~1.3 s            | ~1.4–1.8 s      | 55.8 MB   |
+
+At 1M keys, ~0.9–1.2 s of the save is turning the data into bytes; writing
+and fsyncing the file is the rest. So a non-blocking save that encodes in
+small chunks between client requests would remove most of the pause. The
+catch is keys changing while the save is half done, which is the next design
+problem.
+
 ## Files
 
 ```
 src/
-  main.ts                starts the server, loads the AOF, active expiry timer
+  main.ts                parses settings, starts persistence, then the server
   config.ts              command-line settings (--port, --appendonly, ...)
   server.ts              creates the TCP server, one Connection per client
   connection.ts          leftovers buffer + parse/run/reply loop
@@ -126,8 +172,10 @@ src/
   commands/*.ts          server, keys, strings, lists, hashes, sets
   store.ts               the notebook Map, expiry times, lazy + active expiry
   deque.ts               circular buffer used for lists
-  persistence/aof.ts     AOF writer (with fsync policies) and loader
+  persistence/aof.ts       AOF writer (with fsync policies) and loader
+  persistence/snapshot.ts  snapshot file format, atomic save, load
+  persistence/startup.ts   startup order: snapshot, then the AOF after it
 ```
 
-Later milestones (snapshots, LRU eviction, pub/sub, transactions)
+Later milestones (LRU eviction, pub/sub, transactions)
 add new files beside these without changing their shape.
