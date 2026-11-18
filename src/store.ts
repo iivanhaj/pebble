@@ -119,7 +119,20 @@ export function clear(): void {
 
 // ---- Internals ----
 
+// While the AOF is being replayed, nothing expires: a key's later commands in
+// the file happened before its deadline, so it must still exist when they run.
+let loading = false;
+
+export function setLoading(on: boolean): void {
+  loading = on;
+}
+
+export function isLoading(): boolean {
+  return loading;
+}
+
 function isExpired(key: string): boolean {
+  if (loading) return false;
   const entry = expires.get(key);
   return entry !== undefined && Date.now() > entry.at;
 }

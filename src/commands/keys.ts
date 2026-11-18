@@ -51,7 +51,9 @@ export const keyCommands: Record<string, Command> = {
 function expireAt(key: string, at: number, name: string): Reply {
   if (!Number.isSafeInteger(at)) return invalidExpireTime(name);
   if (!store.has(key)) return 0;
-  if (at <= Date.now()) store.del(key); // a timeout in the past deletes right away
+  // A timeout in the past deletes right away, except while replaying the AOF
+  // (see store.setLoading): then it's kept, and the key expires after loading.
+  if (at <= Date.now() && !store.isLoading()) store.del(key);
   else store.setExpiry(key, at);
   return 1;
 }
