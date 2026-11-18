@@ -3,6 +3,7 @@
 import type { Reply } from "../resp/encoder.js";
 import { type Command, WrongTypeError, wrongArgs } from "./shared.js";
 import { serverCommands } from "./server.js";
+export { onSave } from "./server.js";
 import { keyCommands } from "./keys.js";
 import { stringCommands } from "./strings.js";
 import { listCommands } from "./lists.js";

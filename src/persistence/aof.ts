@@ -15,11 +15,17 @@ export type LoadResult = { commands: number; truncatedBytes: number };
 // broken tail is cut off and loading carries on, like Redis's default
 // "aof-load-truncated yes". Anything else unreadable throws: better to refuse
 // to start than to guess.
-export function loadAof(path: string): LoadResult {
+//
+// `from` skips the start of the file: everything before it is already in the
+// snapshot that was loaded first.
+export function loadAof(path: string, from = 0): LoadResult {
   if (!fs.existsSync(path)) return { commands: 0, truncatedBytes: 0 };
   const bytes = fs.readFileSync(path);
+  if (from > bytes.length) {
+    throw new Error(`${path} is shorter (${bytes.length} bytes) than the snapshot expects (${from} bytes)`);
+  }
 
-  let pos = 0;
+  let pos = from;
   let commands = 0;
   store.setLoading(true);
   try {
@@ -66,9 +72,11 @@ export class AofWriter {
   private timer: NodeJS.Timeout | undefined;
   private unsynced = false; // written since the last fsync?
   private syncing = false; // an everysec fsync is still running
+  size: number; // bytes in the file; a snapshot records this so loading can skip what it already has
 
   constructor(path: string, private policy: FsyncPolicy = "everysec") {
     this.fd = fs.openSync(path, "a"); // "a": every write goes to the end of the file
+    this.size = fs.fstatSync(this.fd).size;
     if (policy === "everysec") {
       this.timer = setInterval(() => this.backgroundSync(), 1000);
       this.timer.unref(); // don't keep the process alive just for this timer
@@ -83,6 +91,7 @@ export class AofWriter {
     while (written < bytes.length) {
       written += fs.writeSync(this.fd, bytes, written);
     }
+    this.size += bytes.length;
     if (this.policy === "always") fs.fsyncSync(this.fd);
     else this.unsynced = true;
   }

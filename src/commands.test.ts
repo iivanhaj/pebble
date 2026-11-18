@@ -107,6 +107,6 @@ test("INFO reports sections, and can return just one", () => {
   assert.match(all, /^# Server\r\npebble_version:/);
   assert.match(all, /\r\n# Persistence\r\nloading:0\r\n/);
   assert.match(all, /\r\n# Keyspace\r\ndb0:keys=2,expires=1,avg_ttl=0\r\n$/);
-  assert.equal(runCommand(["INFO", "persistence"]), "# Persistence\r\nloading:0\r\n");
+  assert.match(runCommand(["INFO", "persistence"]) as string, /^# Persistence\r\nloading:0\r\nrdb_last_save_time:\d+\r\n$/);
   assert.equal(runCommand(["INFO", "nonsense"]), "");
 });

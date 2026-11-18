@@ -4,7 +4,8 @@ import type { FsyncPolicy } from "./persistence/aof.js";
 
 export type Config = {
   port: number;
-  dir: string; // where the AOF lives
+  dir: string; // where the AOF and snapshot live
+  dbfilename: string; // the snapshot file
   appendonly: boolean; // record writes to the AOF? (off by default, like Redis)
   appendfilename: string;
   appendfsync: FsyncPolicy; // when to force the AOF onto the disk; see persistence/aof.ts
@@ -13,6 +14,7 @@ export type Config = {
 const defaults: Config = {
   port: 6380,
   dir: ".",
+  dbfilename: "dump.pebble",
   appendonly: false,
   appendfilename: "appendonly.aof",
   appendfsync: "everysec",
@@ -35,6 +37,9 @@ export function parseArgs(argv: string[]): Config {
         break;
       case "dir":
         config.dir = value;
+        break;
+      case "dbfilename":
+        config.dbfilename = value;
         break;
       case "appendonly":
         if (value !== "yes" && value !== "no") throw new Error(`--appendonly must be yes or no, got "${value}"`);
