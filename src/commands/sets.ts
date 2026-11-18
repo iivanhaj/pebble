@@ -4,6 +4,7 @@ import { type Command, deleteIfEmpty, getOrCreateSet, getSet } from "./shared.js
 export const setCommands: Record<string, Command> = {
   // SADD key member [member ...] -> how many were new
   SADD: {
+    write: true,
     arity: -3,
     run: ([key, ...members]) => {
       const set = getOrCreateSet(key);
@@ -15,6 +16,7 @@ export const setCommands: Record<string, Command> = {
 
   // SREM key member [member ...] -> how many were removed
   SREM: {
+    write: true,
     arity: -3,
     run: ([key, ...members]) => {
       const set = getSet(key);

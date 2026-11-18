@@ -5,6 +5,7 @@ export const listCommands: Record<string, Command> = {
   // LPUSH key element [element ...] -> new length. Each element goes to the
   // front in turn, so LPUSH k a b c gives the list c b a.
   LPUSH: {
+    write: true,
     arity: -3,
     run: ([key, ...elements]) => {
       const list = getOrCreateList(key);
@@ -15,6 +16,7 @@ export const listCommands: Record<string, Command> = {
 
   // RPUSH key element [element ...] -> new length
   RPUSH: {
+    write: true,
     arity: -3,
     run: ([key, ...elements]) => {
       const list = getOrCreateList(key);
@@ -23,8 +25,8 @@ export const listCommands: Record<string, Command> = {
     },
   },
 
-  LPOP: { arity: 2, run: ([key]) => pop(key, "front") },
-  RPOP: { arity: 2, run: ([key]) => pop(key, "back") },
+  LPOP: { write: true, arity: 2, run: ([key]) => pop(key, "front") },
+  RPOP: { write: true, arity: 2, run: ([key]) => pop(key, "back") },
 
   // LRANGE key start stop -> elements from start to stop, both included.
   // Negative indexes count from the end: -1 is the last element.

@@ -4,7 +4,16 @@ import { Deque } from "../deque.js";
 
 // arity follows Redis's convention: it counts the command name itself, and a
 // negative number means "at least". GET is 2 (GET key); DEL is -2 (DEL key [key ...]).
-export type Command = { arity: number; run: (args: string[]) => Reply };
+//
+// write: the command can change data, so it's recorded in the AOF.
+// toAof: what to record, if not the command exactly as it was sent. Gets the
+// arguments and the reply; returns the commands to record (possibly none).
+export type Command = {
+  arity: number;
+  write?: boolean;
+  run: (args: string[]) => Reply;
+  toAof?: (args: string[], reply: Reply) => string[][];
+};
 
 export const OK: Reply = { simple: "OK" };
 export const NOT_AN_INTEGER: Reply = { error: "ERR value is not an integer or out of range" };

@@ -4,6 +4,7 @@ import { type Command, deleteIfEmpty, getHash, getOrCreateHash, wrongArgs } from
 export const hashCommands: Record<string, Command> = {
   // HSET key field value [field value ...] -> how many fields were new
   HSET: {
+    write: true,
     arity: -4,
     run: ([key, ...pairs]) => {
       if (pairs.length % 2 !== 0) return wrongArgs("hset");
@@ -25,6 +26,7 @@ export const hashCommands: Record<string, Command> = {
 
   // HDEL key field [field ...] -> how many fields were removed
   HDEL: {
+    write: true,
     arity: -3,
     run: ([key, ...fields]) => {
       const hash = getHash(key);

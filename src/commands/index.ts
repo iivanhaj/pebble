@@ -18,7 +18,29 @@ const commands: Record<string, Command> = {
   ...setCommands,
 };
 
+// Called with the commands to record every time a write command changes data.
+// The AOF listens here; commands don't need to know the AOF exists.
+type WriteListener = (commands: string[][]) => void;
+let writeListener: WriteListener | null = null;
+
+export function onWrite(listener: WriteListener | null): void {
+  writeListener = listener;
+}
+
 export function runCommand(words: string[]): Reply {
+  const upper = words[0].toUpperCase();
+  const command = Object.hasOwn(commands, upper) ? commands[upper] : undefined;
+  const reply = execute(words);
+
+  const failed = reply !== null && typeof reply === "object" && "error" in reply;
+  if (writeListener && command?.write && !failed) {
+    const toRecord = command.toAof ? command.toAof(words.slice(1), reply) : [words];
+    if (toRecord.length > 0) writeListener(toRecord);
+  }
+  return reply;
+}
+
+function execute(words: string[]): Reply {
   const [name, ...args] = words;
   const upper = name.toUpperCase();
   if (!Object.hasOwn(commands, upper)) {

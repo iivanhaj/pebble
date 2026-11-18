@@ -8,6 +8,7 @@ export const stringCommands: Record<string, Command> = {
   // SET key value [NX | XX] [EX seconds | PX milliseconds]
   // SET replaces whatever the key held before, of any type.
   SET: {
+    write: true,
     arity: -3,
     run: ([key, value, ...options]) => {
       let condition: "NX" | "XX" | undefined;
@@ -33,10 +34,17 @@ export const stringCommands: Record<string, Command> = {
       if (ttlMs !== undefined) store.setExpiry(key, Date.now() + ttlMs);
       return OK;
     },
+    // Recorded as a plain SET, plus PEXPIREAT with the absolute time if it had
+    // EX/PX. Nothing is recorded if NX/XX stopped it (reply null).
+    toAof: ([key, value], reply) => {
+      if (reply === null) return [];
+      const at = store.getExpiry(key);
+      return at === undefined ? [["SET", key, value]] : [["SET", key, value], ["PEXPIREAT", key, String(at)]];
+    },
   },
 
-  INCR: { arity: 2, run: ([key]) => incrementBy(key, 1n) },
-  DECR: { arity: 2, run: ([key]) => incrementBy(key, -1n) },
+  INCR: { write: true, arity: 2, run: ([key]) => incrementBy(key, 1n) },
+  DECR: { write: true, arity: 2, run: ([key]) => incrementBy(key, -1n) },
 
   // MGET key [key ...] -> each value, or null for missing keys (and, like Redis,
   // for keys that hold a list, hash or set instead of a string)
@@ -51,6 +59,7 @@ export const stringCommands: Record<string, Command> = {
 
   // MSET key value [key value ...]
   MSET: {
+    write: true,
     arity: -3,
     run: (args) => {
       if (args.length % 2 !== 0) return wrongArgs("mset");
