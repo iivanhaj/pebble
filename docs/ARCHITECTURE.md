@@ -71,21 +71,63 @@ Like Redis, expired keys are removed two ways:
   and delete the expired ones. If more than a quarter of the sample had
   expired, sample again right away (up to a 25 ms time budget).
 
+## Persistence: the append-only file (AOF)
+
+With `--appendonly yes`, every command that changes data is appended to
+`appendonly.aof`, and on startup the file is replayed from the top to rebuild
+the data. The file uses RESP, the same format clients send, so writing it
+reuses the encoder and reading it reuses the parser.
+
+- **What gets recorded.** Commands flagged `write` in the command table report
+  each change through `onWrite`; the AOF listens there. Commands that changed
+  nothing (an error, a `SET NX` that didn't set) record nothing.
+- **Timeouts are recorded as absolute times.** `SET k v EX 10` and `EXPIRE` are
+  written as `PEXPIREAT k <unix ms>`, so a restart doesn't restart the
+  countdown.
+- **Nothing expires while loading.** A key's later commands in the file
+  happened before its deadline, so it must still exist when they replay.
+  Otherwise `SET k 1`, `PEXPIREAT k <past>`, `INCR k` would delete `k` and then
+  recreate it with no timeout. Expired keys are cleaned up normally once
+  loading is done.
+- **Order on startup:** load the file first, then start recording, so replayed
+  commands aren't written to the file again.
+- **A half-written last command** (the server died mid-write) is cut off and
+  loading continues, like Redis's default `aof-load-truncated yes`. Anything
+  else unreadable refuses to start.
+
+### fsync policies (`--appendfsync`)
+
+Writing to a file only puts bytes in the OS's memory; the OS copies them to the
+disk later. `fsync` forces that copy now, and waits for the disk.
+
+| Policy     | When it fsyncs                         | Lost if the machine loses power |
+|------------|----------------------------------------|---------------------------------|
+| `always`   | after every write, before replying     | nothing                         |
+| `everysec` | once a second, on Node's thread pool   | up to ~1 second (default)       |
+| `no`       | never; the OS decides                  | up to ~30 seconds on Linux      |
+
+If only Pebble crashes (`kill -9`), no policy loses anything: the bytes are
+already in the OS's memory and still reach the disk. `crash.test.ts` checks
+this: it kills a real Pebble process mid-stream and verifies every write the
+client got a reply for survives the restart.
+
 ## Files
 
 ```
 src/
-  main.ts              starts the server on port 6380 + the active expiry timer
-  server.ts            creates the TCP server, one Connection per client
-  connection.ts        leftovers buffer + parse/run/reply loop
-  resp/parser.ts       bytes → ["SET", "name", "Jahnavi"]
-  resp/encoder.ts      "OK" → "+OK\r\n"
-  commands/index.ts    the command table + runCommand
-  commands/shared.ts   arity type, errors, typed getters
-  commands/*.ts        server, keys, strings, lists, hashes, sets
-  store.ts             the notebook Map, expiry times, lazy + active expiry
-  deque.ts             circular buffer used for lists
+  main.ts                starts the server, loads the AOF, active expiry timer
+  config.ts              command-line settings (--port, --appendonly, ...)
+  server.ts              creates the TCP server, one Connection per client
+  connection.ts          leftovers buffer + parse/run/reply loop
+  resp/parser.ts         bytes → ["SET", "name", "Jahnavi"]
+  resp/encoder.ts        "OK" → "+OK\r\n"
+  commands/index.ts      the command table, runCommand, onWrite
+  commands/shared.ts     command type, errors, typed getters
+  commands/*.ts          server, keys, strings, lists, hashes, sets
+  store.ts               the notebook Map, expiry times, lazy + active expiry
+  deque.ts               circular buffer used for lists
+  persistence/aof.ts     AOF writer (with fsync policies) and loader
 ```
 
-Later milestones (AOF, snapshots, LRU eviction, pub/sub, transactions)
+Later milestones (snapshots, LRU eviction, pub/sub, transactions)
 add new files beside these without changing their shape.

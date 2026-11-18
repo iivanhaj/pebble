@@ -20,6 +20,13 @@ npm run build
 npm start          # listens on 127.0.0.1:6380
 ```
 
+To keep data across restarts, turn on the append-only file (settings are
+named like Redis's):
+
+```bash
+npm start -- --appendonly yes --appendfsync everysec
+```
+
 Then connect with `redis-cli` (or, without installing Redis, through Docker):
 
 ```bash
@@ -47,7 +54,7 @@ OK
 | Group      | Commands                                                      |
 |------------|---------------------------------------------------------------|
 | Connection | `PING`, `ECHO`, `INFO`                                        |
-| Keys       | `DEL`, `EXISTS`, `EXPIRE`, `TTL`, `PERSIST`                   |
+| Keys       | `DEL`, `EXISTS`, `EXPIRE`, `PEXPIREAT`, `TTL`, `PERSIST`      |
 | Strings    | `GET`, `SET` (with `EX`, `PX`, `NX`, `XX`), `INCR`, `DECR`, `MGET`, `MSET` |
 | Lists      | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE`                    |
 | Hashes     | `HSET`, `HGET`, `HGETALL`, `HDEL`                             |
@@ -77,6 +84,11 @@ flowchart LR
   (active), the same approach Redis uses.
 - **Lists on a circular buffer.** Pushing and popping at either end is O(1),
   where a plain JavaScript array would be O(n) at the front.
+- **Persistence with an append-only file.** Every write is appended to a file
+  in the same protocol clients speak, and replayed on startup. Timeouts are
+  stored as absolute times so they keep counting down across restarts, and a
+  crash test kills a real server mid-write to check no acknowledged write is
+  ever lost.
 
 More detail, including the design decisions, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -87,10 +99,11 @@ More detail, including the design decisions, is in
 npm test
 ```
 
-82 tests: unit tests for the parser, encoder and every command; end-to-end
+109 tests: unit tests for the parser, encoder and every command; end-to-end
 tests over a real TCP connection (including a command split across packets);
-and tests that drive Pebble with the real `ioredis` client. They run on every
-push in GitHub Actions.
+tests that drive Pebble with the real `ioredis` client; and a crash test that
+`kill -9`s a running server under load and restarts it. They run on every push
+in GitHub Actions.
 
 ## Roadmap
 
@@ -98,7 +111,7 @@ push in GitHub Actions.
 - [x] Strings, `INCR`/`DECR`, `MGET`/`MSET`
 - [x] Key expiry: lazy and active
 - [x] Lists, hashes and sets
-- [ ] Persistence: append-only file with `always` / `everysec` / `no` fsync policies
+- [x] Persistence: append-only file with `always` / `everysec` / `no` fsync policies
 - [ ] Point-in-time snapshots
 - [ ] Memory limit with LRU eviction (exact LRU, then Redis-style sampled LRU)
 - [ ] Pub/sub
