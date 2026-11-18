@@ -1,7 +1,21 @@
 {
   "name": "pebble",
   "version": "0.1.0",
-  "description": "A small Redis-compatible server, written from scratch",
+  "description": "A Redis-compatible server written from scratch in TypeScript on Node.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iivanhaj/pebble.git"
+  },
+  "homepage": "https://github.com/iivanhaj/pebble#readme",
+  "keywords": [
+    "redis",
+    "resp",
+    "key-value-store",
+    "in-memory-database",
+    "typescript",
+    "nodejs"
+  ],
   "private": true,
   "type": "module",
   "engines": {

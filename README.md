@@ -117,3 +117,7 @@ in GitHub Actions.
 - [ ] Pub/sub
 - [ ] Transactions: `MULTI` / `EXEC` / `WATCH`
 - [ ] Benchmarks against real Redis with `redis-benchmark`
+
+## License
+
+[MIT](LICENSE)
