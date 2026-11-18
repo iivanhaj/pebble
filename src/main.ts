@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { AddressInfo } from "node:net";
 import { createServer } from "./server.js";
 import { activeExpireCycle } from "./store.js";
 import { onWrite } from "./commands/index.js";
@@ -18,13 +19,15 @@ if (config.appendonly) {
     console.warn(`The AOF ended with a half-written command; cut off its last ${loaded.truncatedBytes} bytes`);
   }
 
-  const aof = new AofWriter(aofPath);
+  const aof = new AofWriter(aofPath, config.appendfsync);
   onWrite((commands) => aof.append(commands));
-  console.log(`Recording writes to ${aofPath}`);
+  console.log(`Recording writes to ${aofPath} (appendfsync ${config.appendfsync})`);
 }
 
-createServer().listen(config.port, HOST, () => {
-  console.log(`Pebble listening on ${HOST}:${config.port}`);
+const server = createServer();
+server.listen(config.port, HOST, () => {
+  const { port } = server.address() as AddressInfo; // the real port, even with --port 0
+  console.log(`Pebble listening on ${HOST}:${port}`);
 });
 
 // Clean up expired keys nobody reads anymore, 10 times a second (Redis's default "hz 10").

@@ -1,4 +1,4 @@
-import { test, beforeEach, afterEach } from "node:test";
+import { test, beforeEach, afterEach, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -174,4 +174,47 @@ test("a half-written last command is cut off, and the rest loads", () => {
 test("garbage in the file refuses to load", () => {
   fs.writeFileSync(file, "*1\r\n$4\r\nPING\r\nthis is not RESP\r\n");
   assert.throws(() => loadAof(file), /Bad AOF .* at byte 14: Protocol error/);
+});
+
+// ---- fsync policies ----
+
+function spyOnFsync(t: TestContext) {
+  const sync = t.mock.method(fs, "fsyncSync");
+  const background = t.mock.method(fs, "fsync", (_fd: number, done: (err: Error | null) => void) => done(null));
+  return { sync, background };
+}
+
+test("appendfsync always: fsync after every write, before append returns", (t) => {
+  const { sync, background } = spyOnFsync(t);
+  const aof = new AofWriter(file, "always");
+  aof.append([["SET", "a", "1"]]);
+  aof.append([["SET", "b", "2"]]);
+  assert.equal(sync.mock.callCount(), 2);
+  aof.close();
+  assert.equal(sync.mock.callCount(), 2); // nothing left to sync
+  assert.equal(background.mock.callCount(), 0);
+});
+
+test("appendfsync everysec: one background fsync per second, only if something was written", (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const { sync, background } = spyOnFsync(t);
+  const aof = new AofWriter(file, "everysec");
+  aof.append([["SET", "a", "1"]]);
+  aof.append([["SET", "b", "2"]]);
+  assert.equal(background.mock.callCount(), 0);
+  t.mock.timers.tick(1000);
+  assert.equal(background.mock.callCount(), 1); // two writes, one fsync
+  t.mock.timers.tick(1000);
+  assert.equal(background.mock.callCount(), 1); // nothing new written
+  aof.append([["SET", "c", "3"]]);
+  aof.close(); // syncs what's left before closing
+  assert.equal(sync.mock.callCount(), 1);
+});
+
+test("appendfsync no: never fsync", (t) => {
+  const { sync, background } = spyOnFsync(t);
+  const aof = new AofWriter(file, "no");
+  aof.append([["SET", "a", "1"]]);
+  aof.close();
+  assert.equal(sync.mock.callCount() + background.mock.callCount(), 0);
 });

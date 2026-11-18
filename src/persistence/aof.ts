@@ -50,24 +50,58 @@ export function loadAof(path: string): LoadResult {
   return { commands, truncatedBytes };
 }
 
+// Writing to a file only puts the bytes in the OS's memory; the OS copies them
+// to the disk later. fsync forces that copy now. It's slow (it waits for the
+// disk), so like Redis there are three policies:
+//   always:   fsync after every write. Nothing is lost even if the power fails.
+//   everysec: fsync once a second, off the main thread. Lose at most ~1 second.
+//   no:       never fsync; the OS decides when (around 30 seconds on Linux).
+// If only Pebble crashes, nothing is lost under any policy: the bytes are
+// already in the OS's memory and still reach the disk. fsync matters when the
+// whole machine goes down.
+export type FsyncPolicy = "always" | "everysec" | "no";
+
 export class AofWriter {
   private fd: number;
+  private timer: NodeJS.Timeout | undefined;
+  private unsynced = false; // written since the last fsync?
+  private syncing = false; // an everysec fsync is still running
 
-  constructor(path: string) {
+  constructor(path: string, private policy: FsyncPolicy = "everysec") {
     this.fd = fs.openSync(path, "a"); // "a": every write goes to the end of the file
+    if (policy === "everysec") {
+      this.timer = setInterval(() => this.backgroundSync(), 1000);
+      this.timer.unref(); // don't keep the process alive just for this timer
+    }
   }
 
   // Writes the commands before returning, so the client's reply is only sent
-  // once its change is in the file (in the OS's buffers; see fsync).
+  // once its change is in the file.
   append(commands: string[][]): void {
     const bytes = Buffer.concat(commands.map((words) => encode(words)));
     let written = 0;
     while (written < bytes.length) {
       written += fs.writeSync(this.fd, bytes, written);
     }
+    if (this.policy === "always") fs.fsyncSync(this.fd);
+    else this.unsynced = true;
   }
 
   close(): void {
+    clearInterval(this.timer);
+    if (this.unsynced && this.policy !== "no") fs.fsyncSync(this.fd);
     fs.closeSync(this.fd);
+  }
+
+  // fs.fsync (not fsyncSync) runs on Node's thread pool, so the event loop keeps
+  // serving clients while the disk catches up. Redis uses a background thread
+  // for the same reason.
+  private backgroundSync(): void {
+    if (!this.unsynced || this.syncing) return;
+    this.unsynced = false;
+    this.syncing = true;
+    fs.fsync(this.fd, () => {
+      this.syncing = false;
+    });
   }
 }

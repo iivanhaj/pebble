@@ -1,10 +1,13 @@
 // Settings from the command line, named like real Redis's:
 //   npm start -- --port 6380 --appendonly yes --dir ./data
+import type { FsyncPolicy } from "./persistence/aof.js";
+
 export type Config = {
   port: number;
   dir: string; // where the AOF lives
   appendonly: boolean; // record writes to the AOF? (off by default, like Redis)
   appendfilename: string;
+  appendfsync: FsyncPolicy; // when to force the AOF onto the disk; see persistence/aof.ts
 };
 
 const defaults: Config = {
@@ -12,6 +15,7 @@ const defaults: Config = {
   dir: ".",
   appendonly: false,
   appendfilename: "appendonly.aof",
+  appendfsync: "everysec",
 };
 
 export function parseArgs(argv: string[]): Config {
@@ -38,6 +42,12 @@ export function parseArgs(argv: string[]): Config {
         break;
       case "appendfilename":
         config.appendfilename = value;
+        break;
+      case "appendfsync":
+        if (value !== "always" && value !== "everysec" && value !== "no") {
+          throw new Error(`--appendfsync must be always, everysec or no, got "${value}"`);
+        }
+        config.appendfsync = value;
         break;
       default:
         throw new Error(`Unknown setting: --${name}`);
