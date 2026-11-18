@@ -166,3 +166,27 @@ test("timeouts stay correct after keys are removed from the middle", (t) => {
   assert.equal(store.size(), 1); // only a, which no longer expires
   assert.equal(run(["GET", "a"]), "v");
 });
+
+// ---- PEXPIREAT ----
+
+test("PEXPIREAT sets an absolute timeout in milliseconds", (t) => {
+  fakeClock(t); // now = 1,000,000
+  run(["SET", "k", "v"]);
+  assert.equal(run(["PEXPIREAT", "k", "1005000"]), 1);
+  assert.equal(run(["TTL", "k"]), 5);
+  assert.equal(run(["PEXPIREAT", "missing", "1005000"]), 0);
+  t.mock.timers.tick(5001);
+  assert.equal(run(["GET", "k"]), null);
+});
+
+test("PEXPIREAT with a time in the past deletes the key", (t) => {
+  fakeClock(t);
+  run(["SET", "k", "v"]);
+  assert.equal(run(["PEXPIREAT", "k", "999999"]), 1);
+  assert.equal(run(["EXISTS", "k"]), 0);
+});
+
+test("PEXPIREAT rejects non-integers", () => {
+  run(["SET", "k", "v"]);
+  assert.deepEqual(run(["PEXPIREAT", "k", "tomorrow"]), { error: "ERR value is not an integer or out of range" });
+});
