@@ -78,7 +78,63 @@ const commands: Record<string, Command> = {
 
   // PERSIST key -> 1 if a timeout was removed, 0 otherwise
   PERSIST: { arity: 2, run: ([key]) => (store.persist(key) ? 1 : 0) },
+
+  INCR: { arity: 2, run: ([key]) => incrementBy(key, 1n) },
+  DECR: { arity: 2, run: ([key]) => incrementBy(key, -1n) },
+
+  // MGET key [key ...] -> each value, or null for missing keys
+  MGET: { arity: -2, run: (keys) => keys.map((key) => store.get(key) ?? null) },
+
+  // MSET key value [key value ...]
+  MSET: {
+    arity: -3,
+    run: (args) => {
+      if (args.length % 2 !== 0) return wrongArgs("mset");
+      for (let i = 0; i < args.length; i += 2) store.set(args[i], args[i + 1]);
+      return OK;
+    },
+  },
+
+  // INFO [section ...] -> "# Section\r\nfield:value\r\n..." as one bulk string.
+  // Clients like ioredis send INFO on connect and wait until "loading:0".
+  INFO: {
+    arity: -1,
+    run: (args) => {
+      const wanted = args.map((arg) => arg.toLowerCase());
+      const showAll = wanted.length === 0 || wanted.some((w) => ["all", "everything", "default"].includes(w));
+      return infoSections()
+        .filter(([name]) => showAll || wanted.includes(name.toLowerCase()))
+        .map(([name, fields]) => `# ${name}\r\n${fields.map((field) => `${field}\r\n`).join("")}`)
+        .join("\r\n");
+    },
+  },
 };
+
+function infoSections(): [string, string[]][] {
+  const keys = store.size();
+  return [
+    ["Server", ["pebble_version:0.1.0", `process_id:${process.pid}`, `uptime_in_seconds:${Math.floor(process.uptime())}`]],
+    ["Persistence", ["loading:0"]], // nothing is loaded from disk yet
+    ["Keyspace", keys > 0 ? [`db0:keys=${keys},expires=${store.expiringCount()},avg_ttl=0`] : []],
+  ];
+}
+
+// Redis stores numbers as strings and does math on 64-bit integers, which is
+// bigger than JS numbers can hold exactly, so this uses BigInt.
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
+function incrementBy(key: string, by: bigint): Reply {
+  const current = store.get(key) ?? "0"; // a missing key counts as 0
+  // Only plain integers: no "+1", " 1", "01" or "1.0", same as Redis.
+  if (!/^(0|-?[1-9]\d*)$/.test(current)) return NOT_AN_INTEGER;
+  const n = BigInt(current);
+  if (n < INT64_MIN || n > INT64_MAX) return NOT_AN_INTEGER;
+  const next = n + by;
+  if (next < INT64_MIN || next > INT64_MAX) return { error: "ERR increment or decrement would overflow" };
+  store.set(key, next.toString(), { keepTtl: true });
+  return next;
+}
 
 export function runCommand(words: string[]): Reply {
   const [name, ...args] = words;

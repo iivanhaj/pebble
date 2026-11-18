@@ -38,3 +38,7 @@ test("non-ASCII bytes round-trip with the byte length, not the character count",
   assert.equal(encoded.toString("latin1").slice(0, 4), "$5\r\n");
   assert.deepEqual(encoded.subarray(4, 9), bytes);
 });
+
+test("BigInt integers beyond JS's safe range", () => {
+  assert.equal(resp(9223372036854775807n), ":9223372036854775807\r\n");
+});

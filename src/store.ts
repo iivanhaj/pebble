@@ -26,10 +26,11 @@ export function has(key: string): boolean {
   return values.has(key);
 }
 
-// Like Redis, a plain SET throws away any old timeout.
-export function set(key: string, value: string): void {
+// Like Redis, a plain SET throws away any old timeout. Commands that change a
+// value in place (INCR, DECR) pass keepTtl so the timeout survives.
+export function set(key: string, value: string, { keepTtl = false } = {}): void {
   values.set(key, value);
-  forgetExpiry(key);
+  if (!keepTtl) forgetExpiry(key);
 }
 
 export function del(key: string): boolean {
@@ -90,13 +91,20 @@ export function activeExpireCycle(): number {
   return deleted;
 }
 
-// ---- For tests ----
+// ---- Counts (for INFO and tests) ----
 
 // Counts keys without checking expiry, like Redis's DBSIZE: expired keys that
 // haven't been cleaned up yet still count.
 export function size(): number {
   return values.size;
 }
+
+// How many keys have a timeout.
+export function expiringCount(): number {
+  return ttlKeys.length;
+}
+
+// ---- For tests ----
 
 export function clear(): void {
   values.clear();
