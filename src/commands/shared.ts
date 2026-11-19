@@ -6,11 +6,14 @@ import { StringList, StringHash, StringSet } from "../values.js";
 // negative number means "at least". GET is 2 (GET key); DEL is -2 (DEL key [key ...]).
 //
 // write: the command can change data, so it's recorded in the AOF.
+// denyoom: the command can add data, so it's refused with an OOM error when
+// memory is over --maxmemory and nothing can be evicted (Redis's flag name).
 // toAof: what to record, if not the command exactly as it was sent. Gets the
 // arguments and the reply; returns the commands to record (possibly none).
 export type Command = {
   arity: number;
   write?: boolean;
+  denyoom?: boolean;
   run: (args: string[]) => Reply;
   toAof?: (args: string[], reply: Reply) => string[][];
 };

@@ -9,6 +9,7 @@ export const stringCommands: Record<string, Command> = {
   // SET replaces whatever the key held before, of any type.
   SET: {
     write: true,
+    denyoom: true,
     arity: -3,
     run: ([key, value, ...options]) => {
       let condition: "NX" | "XX" | undefined;
@@ -43,8 +44,8 @@ export const stringCommands: Record<string, Command> = {
     },
   },
 
-  INCR: { write: true, arity: 2, run: ([key]) => incrementBy(key, 1n) },
-  DECR: { write: true, arity: 2, run: ([key]) => incrementBy(key, -1n) },
+  INCR: { write: true, denyoom: true, arity: 2, run: ([key]) => incrementBy(key, 1n) },
+  DECR: { write: true, denyoom: true, arity: 2, run: ([key]) => incrementBy(key, -1n) },
 
   // MGET key [key ...] -> each value, or null for missing keys (and, like Redis,
   // for keys that hold a list, hash or set instead of a string)
@@ -60,6 +61,7 @@ export const stringCommands: Record<string, Command> = {
   // MSET key value [key value ...]
   MSET: {
     write: true,
+    denyoom: true,
     arity: -3,
     run: (args) => {
       if (args.length % 2 !== 0) return wrongArgs("mset");

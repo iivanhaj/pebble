@@ -1,5 +1,6 @@
 import { RandomKeySet } from "./random-key-set.js";
 import { type Value, sizeOf } from "./values.js";
+import * as eviction from "./eviction.js";
 
 export type { Value };
 
@@ -111,15 +112,21 @@ export function* entries(): Generator<[string, Value, number | undefined]> {
 
 // ---- Memory ----
 
-// Re-measures every key touched since the last call. Called after each command.
+// Re-measures every key touched since the last call, and tells the eviction
+// policy those keys were just used. Called after each command.
 export function settle(): void {
   for (const key of touched) {
     const value = values.get(key);
     const old = sizes.get(key) ?? 0;
     const now = value === undefined ? 0 : sizeOf(key, value);
     usedBytes += now - old;
-    if (value === undefined) sizes.delete(key);
-    else sizes.set(key, now);
+    if (value === undefined) {
+      sizes.delete(key);
+      eviction.forget(key);
+    } else {
+      sizes.set(key, now);
+      eviction.touch(key);
+    }
   }
   touched.clear();
 }
@@ -158,6 +165,7 @@ export function clear(): void {
   sizes.clear();
   usedBytes = 0;
   touched.clear();
+  eviction.clearTracking();
 }
 
 // ---- Internals ----
@@ -188,6 +196,7 @@ function remove(key: string): boolean {
   forgetExpiry(key);
   usedBytes -= sizes.get(key) ?? 0;
   sizes.delete(key);
+  eviction.forget(key);
   return values.delete(key);
 }
 

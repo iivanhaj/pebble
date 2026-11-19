@@ -6,6 +6,7 @@ export const listCommands: Record<string, Command> = {
   // front in turn, so LPUSH k a b c gives the list c b a.
   LPUSH: {
     write: true,
+    denyoom: true,
     arity: -3,
     run: ([key, ...elements]) => {
       const list = getOrCreateList(key);
@@ -17,6 +18,7 @@ export const listCommands: Record<string, Command> = {
   // RPUSH key element [element ...] -> new length
   RPUSH: {
     write: true,
+    denyoom: true,
     arity: -3,
     run: ([key, ...elements]) => {
       const list = getOrCreateList(key);

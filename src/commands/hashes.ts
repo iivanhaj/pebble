@@ -5,6 +5,7 @@ export const hashCommands: Record<string, Command> = {
   // HSET key field value [field value ...] -> how many fields were new
   HSET: {
     write: true,
+    denyoom: true,
     arity: -4,
     run: ([key, ...pairs]) => {
       if (pairs.length % 2 !== 0) return wrongArgs("hset");

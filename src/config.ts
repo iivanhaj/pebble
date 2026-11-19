@@ -1,6 +1,7 @@
 // Settings from the command line, named like real Redis's:
 //   npm start -- --port 6380 --appendonly yes --dir ./data
 import type { FsyncPolicy } from "./persistence/aof.js";
+import type { EvictionPolicy } from "./eviction.js";
 
 export type Config = {
   port: number;
@@ -9,6 +10,8 @@ export type Config = {
   appendonly: boolean; // record writes to the AOF? (off by default, like Redis)
   appendfilename: string;
   appendfsync: FsyncPolicy; // when to force the AOF onto the disk; see persistence/aof.ts
+  maxmemory: number; // bytes; 0 = no limit
+  maxmemoryPolicy: EvictionPolicy; // what to do at the limit; see eviction.ts
 };
 
 const defaults: Config = {
@@ -18,7 +21,20 @@ const defaults: Config = {
   appendonly: false,
   appendfilename: "appendonly.aof",
   appendfsync: "everysec",
+  maxmemory: 0,
+  maxmemoryPolicy: "noeviction",
 };
+
+const POLICIES: EvictionPolicy[] = ["noeviction", "allkeys-lru-exact"];
+
+// "100mb" -> 104857600. Units as in redis.conf: k = 1000, kb = 1024, m = 1000^2,
+// mb = 1024^2, g = 1000^3, gb = 1024^3. No unit means bytes.
+export function parseMemory(text: string): number {
+  const match = /^(\d+)(b|k|kb|m|mb|g|gb)?$/i.exec(text);
+  if (!match) throw new Error(`Invalid memory size: ${text}`);
+  const units: Record<string, number> = { b: 1, k: 1e3, kb: 1024, m: 1e6, mb: 1024 ** 2, g: 1e9, gb: 1024 ** 3 };
+  return Number(match[1]) * units[(match[2] ?? "b").toLowerCase()];
+}
 
 export function parseArgs(argv: string[]): Config {
   const config = { ...defaults };
@@ -53,6 +69,15 @@ export function parseArgs(argv: string[]): Config {
           throw new Error(`--appendfsync must be always, everysec or no, got "${value}"`);
         }
         config.appendfsync = value;
+        break;
+      case "maxmemory":
+        config.maxmemory = parseMemory(value);
+        break;
+      case "maxmemory-policy":
+        if (!POLICIES.includes(value as EvictionPolicy)) {
+          throw new Error(`--maxmemory-policy must be one of ${POLICIES.join(", ")}, got "${value}"`);
+        }
+        config.maxmemoryPolicy = value as EvictionPolicy;
         break;
       default:
         throw new Error(`Unknown setting: --${name}`);

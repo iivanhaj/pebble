@@ -74,5 +74,5 @@ test("the running total always matches a recount, over 5,000 random commands", (
 
 test("INFO memory reports used_memory", () => {
   run(["SET", "k", "v"]);
-  assert.equal(run(["INFO", "memory"]), `# Memory\r\nused_memory:${store.usedMemory()}\r\n`);
+  assert.ok((run(["INFO", "memory"]) as string).startsWith(`# Memory\r\nused_memory:${store.usedMemory()}\r\n`));
 });

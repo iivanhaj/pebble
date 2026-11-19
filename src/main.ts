@@ -3,9 +3,13 @@ import { createServer } from "./server.js";
 import { activeExpireCycle } from "./store.js";
 import { parseArgs } from "./config.js";
 import { startPersistence } from "./persistence/startup.js";
+import { configureEviction } from "./eviction.js";
 
 const HOST = "127.0.0.1";
 const config = parseArgs(process.argv.slice(2));
+
+// Set up eviction first, so it learns about every key as data is loaded.
+configureEviction({ maxmemory: config.maxmemory, policy: config.maxmemoryPolicy });
 
 // Load the snapshot and AOF before accepting any clients.
 for (const message of startPersistence(config).messages) console.log(message);

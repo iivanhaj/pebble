@@ -2,6 +2,7 @@
 // the function that runs it. Each file in this folder holds one group.
 import type { Reply } from "../resp/encoder.js";
 import * as store from "../store.js";
+import * as eviction from "../eviction.js";
 import { type Command, WrongTypeError, wrongArgs } from "./shared.js";
 import { serverCommands } from "./server.js";
 export { onSave } from "./server.js";
@@ -32,6 +33,13 @@ export function onWrite(listener: WriteListener | null): void {
 export function runCommand(words: string[]): Reply {
   const upper = words[0].toUpperCase();
   const command = Object.hasOwn(commands, upper) ? commands[upper] : undefined;
+
+  // Like Redis: before running a command, evict until memory is under the
+  // limit. If that isn't possible (noeviction), refuse commands that add data.
+  if (command && !store.isLoading()) {
+    evictIfNeeded();
+    if (command.denyoom && overLimit()) return OOM;
+  }
   let reply: Reply;
   try {
     reply = execute(words);
@@ -45,6 +53,23 @@ export function runCommand(words: string[]): Reply {
     if (toRecord.length > 0) writeListener(toRecord);
   }
   return reply;
+}
+
+const OOM: Reply = { error: "OOM command not allowed when used memory > 'maxmemory'." };
+
+function overLimit(): boolean {
+  return eviction.maxmemory() > 0 && store.usedMemory() > eviction.maxmemory();
+}
+
+// Each evicted key is recorded as a DEL, so the AOF doesn't bring it back.
+function evictIfNeeded(): void {
+  while (overLimit()) {
+    const key = eviction.victim();
+    if (key === undefined) return; // noeviction, or nothing left
+    store.del(key);
+    eviction.countEviction();
+    writeListener?.([["DEL", key]]);
+  }
 }
 
 function execute(words: string[]): Reply {

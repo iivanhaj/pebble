@@ -5,6 +5,7 @@ export const setCommands: Record<string, Command> = {
   // SADD key member [member ...] -> how many were new
   SADD: {
     write: true,
+    denyoom: true,
     arity: -3,
     run: ([key, ...members]) => {
       const set = getOrCreateSet(key);

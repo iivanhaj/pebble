@@ -1,4 +1,5 @@
 import * as store from "../store.js";
+import * as eviction from "../eviction.js";
 import { type Command, OK, wrongArgs } from "./shared.js";
 
 // SAVE calls this to write a snapshot. Startup code registers it, so commands
@@ -60,8 +61,16 @@ function infoSections(): [string, string[]][] {
   const keys = store.size();
   return [
     ["Server", ["pebble_version:0.1.0", `process_id:${process.pid}`, `uptime_in_seconds:${Math.floor(process.uptime())}`]],
-    ["Memory", [`used_memory:${store.usedMemory()}`]], // an estimate; see values.ts
+    [
+      "Memory",
+      [
+        `used_memory:${store.usedMemory()}`, // an estimate; see values.ts
+        `maxmemory:${eviction.maxmemory()}`,
+        `maxmemory_policy:${eviction.evictionPolicy()}`,
+      ],
+    ],
     ["Persistence", ["loading:0", `rdb_last_save_time:${lastSave}`]], // loading finishes before clients connect
+    ["Stats", [`evicted_keys:${eviction.evictedKeys()}`]],
     ["Keyspace", keys > 0 ? [`db0:keys=${keys},expires=${store.expiringCount()},avg_ttl=0`] : []],
   ];
 }
