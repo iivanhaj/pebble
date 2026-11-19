@@ -1,4 +1,5 @@
 import { Deque } from "./deque.js";
+import { RandomKeySet } from "./random-key-set.js";
 
 // The notebook: every key and its value, plus expiry times for keys that have one.
 //
@@ -12,12 +13,11 @@ export type Value = string | Deque<string> | Map<string, string> | Set<string>;
 
 const values = new Map<string, Value>();
 
-// Only keys with a timeout are in here. `slot` is the key's index in ttlKeys.
-const expires = new Map<string, { at: number; slot: number }>();
+// Only keys with a timeout are in here: key -> unix time in ms.
+const expires = new Map<string, number>();
 
-// The same keys as `expires`, in an array so we can pick a random one in O(1).
-// Removing one swaps the last key into its slot, so removal is O(1) too.
-const ttlKeys: string[] = [];
+// The same keys again, so active expiry can pick random ones in O(1).
+const ttlKeys = new RandomKeySet();
 
 // ---- Reads and writes (all go through expireIfNeeded) ----
 
@@ -47,18 +47,13 @@ export function del(key: string): boolean {
 
 // `at` is a Date.now()-style timestamp in milliseconds. The key must exist.
 export function setExpiry(key: string, at: number): void {
-  const entry = expires.get(key);
-  if (entry) {
-    entry.at = at;
-  } else {
-    expires.set(key, { at, slot: ttlKeys.length });
-    ttlKeys.push(key);
-  }
+  expires.set(key, at);
+  ttlKeys.add(key);
 }
 
 export function getExpiry(key: string): number | undefined {
   expireIfNeeded(key);
-  return expires.get(key)?.at;
+  return expires.get(key);
 }
 
 // Removes the key's timeout. Returns false if it had none (or doesn't exist).
@@ -80,11 +75,11 @@ export function activeExpireCycle(): number {
   const start = Date.now();
   let deleted = 0;
 
-  while (ttlKeys.length > 0) {
-    const sampled = Math.min(SAMPLE_SIZE, ttlKeys.length);
+  while (ttlKeys.size > 0) {
+    const sampled = Math.min(SAMPLE_SIZE, ttlKeys.size);
     let expired = 0;
     for (let i = 0; i < sampled; i++) {
-      const key = ttlKeys[Math.floor(Math.random() * ttlKeys.length)];
+      const key = ttlKeys.random()!;
       if (isExpired(key)) {
         remove(key);
         expired++;
@@ -101,7 +96,7 @@ export function activeExpireCycle(): number {
 // Every key with its value and expiry time (undefined if none). Doesn't check
 // expiry: a snapshot saves exactly what's in memory.
 export function* entries(): Generator<[string, Value, number | undefined]> {
-  for (const [key, value] of values) yield [key, value, expires.get(key)?.at];
+  for (const [key, value] of values) yield [key, value, expires.get(key)];
 }
 
 // ---- Counts (for INFO and tests) ----
@@ -114,7 +109,7 @@ export function size(): number {
 
 // How many keys have a timeout.
 export function expiringCount(): number {
-  return ttlKeys.length;
+  return ttlKeys.size;
 }
 
 // ---- For tests ----
@@ -122,7 +117,7 @@ export function expiringCount(): number {
 export function clear(): void {
   values.clear();
   expires.clear();
-  ttlKeys.length = 0;
+  ttlKeys.clear();
 }
 
 // ---- Internals ----
@@ -141,8 +136,8 @@ export function isLoading(): boolean {
 
 function isExpired(key: string): boolean {
   if (loading) return false;
-  const entry = expires.get(key);
-  return entry !== undefined && Date.now() > entry.at;
+  const at = expires.get(key);
+  return at !== undefined && Date.now() > at;
 }
 
 function expireIfNeeded(key: string): void {
@@ -155,13 +150,6 @@ function remove(key: string): boolean {
 }
 
 function forgetExpiry(key: string): boolean {
-  const entry = expires.get(key);
-  if (!entry) return false;
-  const last = ttlKeys.pop()!;
-  if (last !== key) {
-    ttlKeys[entry.slot] = last; // move the last key into the freed slot
-    expires.get(last)!.slot = entry.slot;
-  }
-  expires.delete(key);
-  return true;
+  ttlKeys.delete(key);
+  return expires.delete(key);
 }
