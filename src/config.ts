@@ -1,7 +1,7 @@
 // Settings from the command line, named like real Redis's:
 //   npm start -- --port 6380 --appendonly yes --dir ./data
 import type { FsyncPolicy } from "./persistence/aof.js";
-import type { EvictionPolicy } from "./eviction.js";
+import { POLICIES, type EvictionPolicy } from "./eviction.js";
 
 export type Config = {
   port: number;
@@ -12,6 +12,7 @@ export type Config = {
   appendfsync: FsyncPolicy; // when to force the AOF onto the disk; see persistence/aof.ts
   maxmemory: number; // bytes; 0 = no limit
   maxmemoryPolicy: EvictionPolicy; // what to do at the limit; see eviction.ts
+  maxmemorySamples: number; // keys allkeys-lru looks at per eviction
 };
 
 const defaults: Config = {
@@ -23,9 +24,8 @@ const defaults: Config = {
   appendfsync: "everysec",
   maxmemory: 0,
   maxmemoryPolicy: "noeviction",
+  maxmemorySamples: 5,
 };
-
-const POLICIES: EvictionPolicy[] = ["noeviction", "allkeys-lru-exact"];
 
 // "100mb" -> 104857600. Units as in redis.conf: k = 1000, kb = 1024, m = 1000^2,
 // mb = 1024^2, g = 1000^3, gb = 1024^3. No unit means bytes.
@@ -78,6 +78,12 @@ export function parseArgs(argv: string[]): Config {
           throw new Error(`--maxmemory-policy must be one of ${POLICIES.join(", ")}, got "${value}"`);
         }
         config.maxmemoryPolicy = value as EvictionPolicy;
+        break;
+      case "maxmemory-samples":
+        config.maxmemorySamples = Number(value);
+        if (!Number.isInteger(config.maxmemorySamples) || config.maxmemorySamples < 1) {
+          throw new Error(`--maxmemory-samples must be a whole number of at least 1, got "${value}"`);
+        }
         break;
       default:
         throw new Error(`Unknown setting: --${name}`);

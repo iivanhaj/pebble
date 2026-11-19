@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import { parseArgs, parseMemory } from "./config.js";
 
 test("defaults: port 6380, AOF off", () => {
-  assert.deepEqual(parseArgs([]), { port: 6380, dir: ".", dbfilename: "dump.pebble", appendonly: false, appendfilename: "appendonly.aof", appendfsync: "everysec", maxmemory: 0, maxmemoryPolicy: "noeviction" });
+  assert.deepEqual(parseArgs([]), { port: 6380, dir: ".", dbfilename: "dump.pebble", appendonly: false, appendfilename: "appendonly.aof", appendfsync: "everysec", maxmemory: 0, maxmemoryPolicy: "noeviction", maxmemorySamples: 5 });
 });
 
 test("reads --name value pairs", () => {
   const config = parseArgs(["--port", "7000", "--appendonly", "yes", "--dir", "data", "--appendfilename", "x.aof", "--appendfsync", "always", "--dbfilename", "snap.pebble"]);
-  assert.deepEqual(config, { port: 7000, dir: "data", dbfilename: "snap.pebble", appendonly: true, appendfilename: "x.aof", appendfsync: "always", maxmemory: 0, maxmemoryPolicy: "noeviction" });
+  assert.deepEqual(config, { port: 7000, dir: "data", dbfilename: "snap.pebble", appendonly: true, appendfilename: "x.aof", appendfsync: "always", maxmemory: 0, maxmemoryPolicy: "noeviction", maxmemorySamples: 5 });
 });
 
 test("rejects bad input", () => {
@@ -28,5 +28,7 @@ test("--maxmemory understands Redis's units", () => {
   assert.equal(parseMemory("64kb"), 65536);
   assert.throws(() => parseMemory("lots"), /Invalid memory size/);
   assert.equal(parseArgs(["--maxmemory", "1mb", "--maxmemory-policy", "allkeys-lru-exact"]).maxmemory, 1024 * 1024);
-  assert.throws(() => parseArgs(["--maxmemory-policy", "volatile-ttl"]), /must be one of noeviction, allkeys-lru-exact/);
+  assert.throws(() => parseArgs(["--maxmemory-policy", "volatile-ttl"]), /must be one of noeviction, allkeys-lru, allkeys-lru-exact, allkeys-random/);
+  assert.equal(parseArgs(["--maxmemory-samples", "10"]).maxmemorySamples, 10);
+  assert.throws(() => parseArgs(["--maxmemory-samples", "0"]), /at least 1/);
 });

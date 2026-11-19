@@ -8,9 +8,9 @@ import * as store from "./store.js";
 const VALUE = "x".repeat(100);
 const KEY_SIZE = sizeOf("k0", VALUE); // every key below is k<digit>, so all the same size
 
-function limit(keys: number, policy: EvictionPolicy) {
+function limit(keys: number, policy: EvictionPolicy, samples?: number) {
   store.clear();
-  configureEviction({ maxmemory: keys * KEY_SIZE, policy });
+  configureEviction({ maxmemory: keys * KEY_SIZE, policy, samples });
 }
 
 beforeEach(() => store.clear());
@@ -90,4 +90,49 @@ test("INFO shows the limit and policy", () => {
   const info = run(["INFO", "memory"]) as string;
   assert.match(info, new RegExp(`maxmemory:${3 * KEY_SIZE}\r\n`));
   assert.match(info, /maxmemory_policy:allkeys-lru-exact\r\n/);
+});
+
+// ---- Sampled LRU and random (results are random, so these check tendencies) ----
+
+// Fills `size` keys (old:0 ... old:N), then adds `added` new keys one at a time.
+// Returns how many of the old keys and of the new keys are still there.
+function churn(policy: EvictionPolicy, size: number, added: number, samples?: number) {
+  const value = "x".repeat(100);
+  const keySize = sizeOf("old:000", value);
+  store.clear();
+  configureEviction({ maxmemory: size * keySize, policy, samples });
+  for (let i = 0; i < size; i++) run(["SET", `old:${String(i).padStart(3, "0")}`, value]);
+  for (let i = 0; i < added; i++) run(["SET", `new:${String(i).padStart(3, "0")}`, value]);
+  run(["PING"]);
+  let oldLeft = 0;
+  let newLeft = 0;
+  for (let i = 0; i < size; i++) oldLeft += run(["EXISTS", `old:${String(i).padStart(3, "0")}`]) as number;
+  for (let i = 0; i < added; i++) newLeft += run(["EXISTS", `new:${String(i).padStart(3, "0")}`]) as number;
+  return { oldLeft, newLeft };
+}
+
+test("allkeys-lru (sampled): with enough samples it finds the oldest key", () => {
+  limit(5, "allkeys-lru", 100); // 100 samples of 6 keys: missing the oldest is ~1 in 10^8
+  for (const key of ["k0", "k1", "k2", "k3", "k4"]) run(["SET", key, VALUE]);
+  run(["GET", "k0"]);
+  run(["SET", "k5", VALUE]);
+  assert.equal(run(["EXISTS", "k1"]), 0);
+  assert.equal(run(["DBSIZE"]), 5);
+});
+
+test("allkeys-lru (sampled, 5 samples): evicts mostly old keys, keeps mostly new ones", () => {
+  const { oldLeft, newLeft } = churn("allkeys-lru", 200, 100);
+  assert.equal(oldLeft + newLeft, 200);
+  assert.ok(newLeft >= 90, `only ${newLeft} of 100 new keys survived`);
+});
+
+test("allkeys-random: evicts without regard to age", () => {
+  const { oldLeft, newLeft } = churn("allkeys-random", 200, 100);
+  assert.equal(oldLeft + newLeft, 200);
+  assert.ok(newLeft < 90, `${newLeft} of 100 new keys survived; random eviction should lose more`);
+});
+
+test("allkeys-lru-exact: evicts exactly the old keys", () => {
+  const { oldLeft, newLeft } = churn("allkeys-lru-exact", 200, 100);
+  assert.deepEqual({ oldLeft, newLeft }, { oldLeft: 100, newLeft: 100 });
 });
