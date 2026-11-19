@@ -1,6 +1,6 @@
 import type { Reply } from "../resp/encoder.js";
 import * as store from "../store.js";
-import { Deque } from "../deque.js";
+import { StringList, StringHash, StringSet } from "../values.js";
 
 // arity follows Redis's convention: it counts the command name itself, and a
 // negative number means "at least". GET is 2 (GET key); DEL is -2 (DEL key [key ...]).
@@ -49,14 +49,14 @@ function getTyped<T extends store.Value>(key: string, isType: (value: store.Valu
 }
 
 export const getString = (key: string) => getTyped(key, (v): v is string => typeof v === "string");
-export const getList = (key: string) => getTyped(key, (v): v is Deque<string> => v instanceof Deque);
-export const getHash = (key: string) => getTyped(key, (v): v is Map<string, string> => v instanceof Map);
-export const getSet = (key: string) => getTyped(key, (v): v is Set<string> => v instanceof Set);
+export const getList = (key: string) => getTyped(key, (v): v is StringList => v instanceof StringList);
+export const getHash = (key: string) => getTyped(key, (v): v is StringHash => v instanceof StringHash);
+export const getSet = (key: string) => getTyped(key, (v): v is StringSet => v instanceof StringSet);
 
 // For writes: same as above, but a missing key is created empty.
-export const getOrCreateList = (key: string) => getList(key) ?? created(key, new Deque<string>());
-export const getOrCreateHash = (key: string) => getHash(key) ?? created(key, new Map<string, string>());
-export const getOrCreateSet = (key: string) => getSet(key) ?? created(key, new Set<string>());
+export const getOrCreateList = (key: string) => getList(key) ?? created(key, new StringList());
+export const getOrCreateHash = (key: string) => getHash(key) ?? created(key, new StringHash());
+export const getOrCreateSet = (key: string) => getSet(key) ?? created(key, new StringSet());
 
 function created<T extends store.Value>(key: string, value: T): T {
   store.set(key, value);

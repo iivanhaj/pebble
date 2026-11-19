@@ -16,7 +16,7 @@
 //   crc32       uint32          checksum of everything before it
 import fs from "node:fs";
 import zlib from "node:zlib";
-import { Deque } from "../deque.js";
+import { StringList, StringHash, StringSet } from "../values.js";
 import * as store from "../store.js";
 
 const MAGIC = "PEBBLE01";
@@ -42,13 +42,13 @@ export function encodeSnapshot(aofOffset: number): Buffer {
       out.int64(expiresAt ?? -1);
       out.string(key);
       out.string(value);
-    } else if (value instanceof Deque) {
+    } else if (value instanceof StringList) {
       out.uint8(LIST);
       out.int64(expiresAt ?? -1);
       out.string(key);
       out.uint32(value.length);
       for (let i = 0; i < value.length; i++) out.string(value.at(i)!);
-    } else if (value instanceof Map) {
+    } else if (value instanceof StringHash) {
       out.uint8(HASH);
       out.int64(expiresAt ?? -1);
       out.string(key);
@@ -118,6 +118,7 @@ export function loadSnapshot(path: string): SnapshotInfo {
     if (expiresAt !== -1) store.setExpiry(key, expiresAt);
     keys++;
   }
+  store.settle();
   if (!input.atEnd()) throw new Error(`${path} is damaged: data after the end marker`);
   return { keys, aofOffset, savedAt };
 }
@@ -127,17 +128,17 @@ function readValue(input: ByteReader, type: number): store.Value {
     case STRING:
       return input.string();
     case LIST: {
-      const list = new Deque<string>();
+      const list = new StringList();
       for (let n = input.uint32(); n > 0; n--) list.pushBack(input.string());
       return list;
     }
     case HASH: {
-      const hash = new Map<string, string>();
+      const hash = new StringHash();
       for (let n = input.uint32(); n > 0; n--) hash.set(input.string(), input.string());
       return hash;
     }
     case SET: {
-      const set = new Set<string>();
+      const set = new StringSet();
       for (let n = input.uint32(); n > 0; n--) set.add(input.string());
       return set;
     }

@@ -1,5 +1,7 @@
-import { Deque } from "./deque.js";
 import { RandomKeySet } from "./random-key-set.js";
+import { type Value, sizeOf } from "./values.js";
+
+export type { Value };
 
 // The notebook: every key and its value, plus expiry times for keys that have one.
 //
@@ -8,10 +10,15 @@ import { RandomKeySet } from "./random-key-set.js";
 //   - actively: activeExpireCycle() samples random keys with a timeout, so keys
 //     nobody reads again still get cleaned up
 
-// What a key can hold: a string, a list, a hash (field -> value) or a set.
-export type Value = string | Deque<string> | Map<string, string> | Set<string>;
-
 const values = new Map<string, Value>();
+
+// Estimated memory: each key's size, and the total. Commands change lists,
+// hashes and sets in place, so the store can't see every change as it happens.
+// Instead, every key a command touches is noted, and settle() (run after each
+// command) re-measures just those keys. Measuring is O(1); see values.ts.
+const sizes = new Map<string, number>();
+let usedBytes = 0;
+const touched = new Set<string>();
 
 // Only keys with a timeout are in here: key -> unix time in ms.
 const expires = new Map<string, number>();
@@ -23,11 +30,13 @@ const ttlKeys = new RandomKeySet();
 
 export function get(key: string): Value | undefined {
   expireIfNeeded(key);
+  touched.add(key);
   return values.get(key);
 }
 
 export function has(key: string): boolean {
   expireIfNeeded(key);
+  touched.add(key);
   return values.has(key);
 }
 
@@ -35,6 +44,7 @@ export function has(key: string): boolean {
 // value in place (INCR, DECR) pass keepTtl so the timeout survives.
 export function set(key: string, value: Value, { keepTtl = false } = {}): void {
   values.set(key, value);
+  touched.add(key);
   if (!keepTtl) forgetExpiry(key);
 }
 
@@ -99,6 +109,33 @@ export function* entries(): Generator<[string, Value, number | undefined]> {
   for (const [key, value] of values) yield [key, value, expires.get(key)];
 }
 
+// ---- Memory ----
+
+// Re-measures every key touched since the last call. Called after each command.
+export function settle(): void {
+  for (const key of touched) {
+    const value = values.get(key);
+    const old = sizes.get(key) ?? 0;
+    const now = value === undefined ? 0 : sizeOf(key, value);
+    usedBytes += now - old;
+    if (value === undefined) sizes.delete(key);
+    else sizes.set(key, now);
+  }
+  touched.clear();
+}
+
+// Estimated bytes used by all keys (as of the last settle()).
+export function usedMemory(): number {
+  return usedBytes;
+}
+
+// The same total, worked out from scratch. Slow; only for tests to check usedMemory().
+export function measureFromScratch(): number {
+  let total = 0;
+  for (const [key, value] of values) total += sizeOf(key, value);
+  return total;
+}
+
 // ---- Counts (for INFO and tests) ----
 
 // Counts keys without checking expiry, like Redis's DBSIZE: expired keys that
@@ -118,6 +155,9 @@ export function clear(): void {
   values.clear();
   expires.clear();
   ttlKeys.clear();
+  sizes.clear();
+  usedBytes = 0;
+  touched.clear();
 }
 
 // ---- Internals ----
@@ -146,6 +186,8 @@ function expireIfNeeded(key: string): void {
 
 function remove(key: string): boolean {
   forgetExpiry(key);
+  usedBytes -= sizes.get(key) ?? 0;
+  sizes.delete(key);
   return values.delete(key);
 }
 

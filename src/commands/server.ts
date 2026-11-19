@@ -60,6 +60,7 @@ function infoSections(): [string, string[]][] {
   const keys = store.size();
   return [
     ["Server", ["pebble_version:0.1.0", `process_id:${process.pid}`, `uptime_in_seconds:${Math.floor(process.uptime())}`]],
+    ["Memory", [`used_memory:${store.usedMemory()}`]], // an estimate; see values.ts
     ["Persistence", ["loading:0", `rdb_last_save_time:${lastSave}`]], // loading finishes before clients connect
     ["Keyspace", keys > 0 ? [`db0:keys=${keys},expires=${store.expiringCount()},avg_ttl=0`] : []],
   ];

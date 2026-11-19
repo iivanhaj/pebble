@@ -1,6 +1,7 @@
 // The command table: every command's name -> how many arguments it takes and
 // the function that runs it. Each file in this folder holds one group.
 import type { Reply } from "../resp/encoder.js";
+import * as store from "../store.js";
 import { type Command, WrongTypeError, wrongArgs } from "./shared.js";
 import { serverCommands } from "./server.js";
 export { onSave } from "./server.js";
@@ -31,7 +32,12 @@ export function onWrite(listener: WriteListener | null): void {
 export function runCommand(words: string[]): Reply {
   const upper = words[0].toUpperCase();
   const command = Object.hasOwn(commands, upper) ? commands[upper] : undefined;
-  const reply = execute(words);
+  let reply: Reply;
+  try {
+    reply = execute(words);
+  } finally {
+    store.settle(); // update the memory estimate for the keys this command touched
+  }
 
   const failed = reply !== null && typeof reply === "object" && "error" in reply;
   if (writeListener && command?.write && !failed) {
