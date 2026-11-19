@@ -157,6 +157,75 @@ small chunks between client requests would remove most of the pause. The
 catch is keys changing while the save is half done, which is the next design
 problem.
 
+## Memory limit and eviction
+
+`--maxmemory 100mb` caps memory; `--maxmemory-policy` decides what happens at
+the cap. Like Redis, the check runs before each command: if memory is over the
+limit, keys are evicted until it isn't. Each eviction is recorded in the AOF
+as a `DEL`, so a restart doesn't bring evicted keys back.
+
+### Measuring memory
+
+JS can't tell you how big one object is, and the process heap jumps around
+with garbage collection, so Pebble keeps its own estimate (`values.ts`): the
+characters in a key and its value, plus a fixed overhead per key and per item.
+The overheads were set by measuring V8's real heap growth with 100k–1M keys of
+each type, and the estimate lands within 2% of it:
+
+| Per…           | Overhead  | Why                                   |
+|----------------|-----------|---------------------------------------|
+| key            | 115 bytes | the Map entry, the key and value objects |
+| list item      | 40 bytes  | an array slot and a string            |
+| hash field     | 120 bytes | a hash table entry and two strings    |
+| set member     | 115 bytes | a hash table entry and a string       |
+
+Commands change lists, hashes and sets in place, so the store can't see each
+change as it happens. Instead, lists, hashes and sets count their own
+characters as items go in and out, every key a command touches is noted, and
+after the command `settle()` re-measures just those keys: O(1) per key, even
+for a million-item list. A test runs 5,000 random commands and checks the
+running total against a full recount after every one.
+
+### Policies
+
+| Policy              | What it evicts                                        |
+|---------------------|-------------------------------------------------------|
+| `noeviction`        | nothing; commands that add data get `OOM` (default)   |
+| `allkeys-lru`       | sampled LRU: of N random keys (default 5), the one used longest ago |
+| `allkeys-lru-exact` | exact LRU: always the least recently used key         |
+| `allkeys-random`    | any random key                                        |
+
+**Exact LRU** (`lru-list.ts`) is the classic hash map + doubly linked list:
+the list keeps keys in order of use, the map finds any key's node, so marking
+a key used, removing one and finding the oldest are all O(1).
+
+**Sampled LRU** is what real Redis does. No ordered list: each key just
+remembers when it was last used (a counter), and to evict, it looks at a few
+random keys and takes the oldest of those. It needs a way to pick a random key
+in O(1) (keys in an array, plus key → position) and one number per key.
+
+### Comparing them
+
+`npm run bench:eviction`: Pebble as a cache with room for 10% of 100,000 keys,
+hit with 1,000,000 requests whose popularity follows a Zipf distribution
+(a few hot keys, a long tail), the shape real traffic tends to have. On a miss
+the key is stored, which may evict another.
+
+| Policy                         | Hit rate | Requests/sec | Bookkeeping per key |
+|--------------------------------|----------|--------------|---------------------|
+| `allkeys-lru-exact`            | 73.54%   | ~700k        | 77 bytes            |
+| `allkeys-lru`, 10 samples      | 73.43%   | ~720k        | 50 bytes            |
+| `allkeys-lru`, 5 samples       | 73.17%   | ~780k        | 50 bytes            |
+| `allkeys-lru`, 3 samples       | 72.71%   | ~790k        | 50 bytes            |
+| `allkeys-random`               | 70.05%   | ~810k        | 40 bytes            |
+
+What it shows: Redis's sampled LRU with its default 5 samples gets within 0.4
+points of exact LRU's hit rate, with a third less bookkeeping memory, and runs
+faster, because a read only updates one number instead of relinking list
+nodes. That's why Redis approximates. Random eviction is only ~3.5 points
+behind here because, with a skewed workload, the hot keys get re-added
+quickly after being evicted; less skewed traffic widens the gap.
+
 ## Files
 
 ```
@@ -167,15 +236,20 @@ src/
   connection.ts          leftovers buffer + parse/run/reply loop
   resp/parser.ts         bytes → ["SET", "name", "Jahnavi"]
   resp/encoder.ts        "OK" → "+OK\r\n"
-  commands/index.ts      the command table, runCommand, onWrite
+  commands/index.ts      the command table, runCommand, onWrite, eviction check
   commands/shared.ts     command type, errors, typed getters
   commands/*.ts          server, keys, strings, lists, hashes, sets
-  store.ts               the notebook Map, expiry times, lazy + active expiry
+  store.ts               the notebook Map, expiry, memory estimate
+  values.ts              list/hash/set types that count their bytes; sizeOf
   deque.ts               circular buffer used for lists
+  random-key-set.ts      a set you can pick a random key from in O(1)
+  lru-list.ts            exact LRU: hash map + doubly linked list
+  eviction.ts            maxmemory policies
   persistence/aof.ts       AOF writer (with fsync policies) and loader
   persistence/snapshot.ts  snapshot file format, atomic save, load
   persistence/startup.ts   startup order: snapshot, then the AOF after it
+  bench/eviction-bench.ts  hit rate and memory comparison of the policies
 ```
 
-Later milestones (LRU eviction, pub/sub, transactions)
+Later milestones (pub/sub, transactions)
 add new files beside these without changing their shape.
