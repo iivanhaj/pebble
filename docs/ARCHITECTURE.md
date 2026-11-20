@@ -294,6 +294,43 @@ transaction. If the file ends inside a block (crashed mid-write), the loader
 cuts it back to before the `MULTI`: the transaction is either all there or
 not at all.
 
+## Performance
+
+`npm run bench:throughput` works like `redis-benchmark`'s defaults: 50
+connections, 100,000 requests per test, random keys from 100,000, 3-byte
+values; `SET` and `GET`, each one command per round trip and with 16 sent at
+once (pipelining). Pebble runs as its own process; the 50 connections are
+spread over 4 worker threads, because one Node thread can't keep 50 busy
+connections fed. Timing starts once every connection is open, and each test
+runs 3 times (median shown). Measured on a laptop (Intel i7-13620H, Windows,
+Node 22), with client and server sharing the CPU.
+
+**Finding the hotspot.** The first version of the benchmark ran all 50
+connections on one thread, and profiling Pebble under it showed the server
+was idle 74% of the time: the numbers were measuring the client. With the
+load spread over worker threads, Pebble was busy, and the profile was clear:
+46% of its time was in `writeBuffer`, i.e. `socket.write`. Pebble wrote every
+reply to the socket separately, so 16 pipelined commands meant 16 trips into
+the OS.
+
+**The fix.** Collect the replies to every command in one chunk of input and
+send them with one write, which is what Redis does (`connection.ts`):
+
+| Test              | Before     | After       |                |
+|-------------------|------------|-------------|----------------|
+| SET               | 44,500/s   | 44,300/s    | unchanged      |
+| GET               | 46,900/s   | 46,500/s    | unchanged      |
+| SET, pipeline 16  | 69,000/s   | 205,500/s   | **3.0× faster** |
+| GET, pipeline 16  | 74,300/s   | 243,500/s   | **3.3× faster** |
+
+A pipelined batch's round trip went from ~11 ms to ~3.5 ms (median). Without
+pipelining nothing changed, as expected: one command per round trip means one
+reply per write either way, and that write per request is a cost real Redis
+pays too.
+
+**Still to do:** the same tests with the real `redis-benchmark`, against both
+Pebble and real Redis on the same machine, for a side-by-side comparison.
+
 ## Files
 
 ```
@@ -320,6 +357,7 @@ src/
   persistence/snapshot.ts  snapshot file format, atomic save, load
   persistence/startup.ts   startup order: snapshot, then the AOF after it
   bench/eviction-bench.ts  hit rate and memory comparison of the policies
+  bench/throughput-bench.ts  requests/sec and latency, like redis-benchmark
 ```
 
-Next: benchmarks against real Redis with `redis-benchmark`.
+Next: the same benchmark with `redis-benchmark`, side by side with real Redis.

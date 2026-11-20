@@ -137,8 +137,25 @@ tests that drive Pebble with the real `ioredis` client; and a crash test that
 in GitHub Actions.
 
 ```bash
-npm run bench:eviction   # hit rate and memory cost of each eviction policy
+npm run bench:eviction     # hit rate and memory cost of each eviction policy
+npm run bench:throughput   # requests/sec and latency, like redis-benchmark
 ```
+
+## Performance
+
+On a laptop (i7-13620H, 50 connections, 100,000 random keys):
+
+| Test              | Requests/sec |
+|-------------------|--------------|
+| SET               | ~44,000      |
+| GET               | ~47,000      |
+| SET, pipeline 16  | ~205,000     |
+| GET, pipeline 16  | ~243,000     |
+
+Profiling showed 46% of the server's time went to `socket.write`: every reply
+was written separately. Sending all the replies to one chunk of input in a
+single write, as Redis does, made pipelined throughput **3× faster**. The
+details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#performance).
 
 ## Roadmap
 
@@ -152,7 +169,8 @@ npm run bench:eviction   # hit rate and memory cost of each eviction policy
 - [x] Memory limit with LRU eviction: exact LRU and Redis-style sampled LRU, compared
 - [x] Pub/sub, with Redis's subscribed mode and slow-subscriber limits
 - [x] Transactions: `MULTI` / `EXEC` / `DISCARD` / `WATCH`, all-or-nothing in the AOF
-- [ ] Benchmarks against real Redis with `redis-benchmark`
+- [x] Throughput benchmark; profiled and fixed the top hotspot (3× faster pipelined)
+- [ ] Side-by-side with real Redis using `redis-benchmark`
 
 ## License
 
