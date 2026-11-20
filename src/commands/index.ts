@@ -13,6 +13,7 @@ import { listCommands } from "./lists.js";
 import { hashCommands } from "./hashes.js";
 import { setCommands } from "./sets.js";
 import { pubsubCommands } from "./pubsub.js";
+import { transactionCommands } from "./transactions.js";
 
 const commands: Record<string, Command> = {
   ...serverCommands,
@@ -22,7 +23,14 @@ const commands: Record<string, Command> = {
   ...hashCommands,
   ...setCommands,
   ...pubsubCommands,
+  ...transactionCommands,
+
+  // EXEC -> an array with the reply of each queued command, in order.
+  EXEC: { arity: 1, run: (_args, client) => exec(client) },
 };
+
+// Inside MULTI, every command is queued except these, which act right away.
+const RUN_DURING_MULTI = new Set(["EXEC", "DISCARD", "MULTI", "QUIT"]);
 
 // Once a client has subscribed to a channel, it's in "subscribed mode" and can
 // only use these until it unsubscribes from everything (RESP2's rule).
@@ -42,6 +50,7 @@ export function onWrite(listener: WriteListener | null): void {
 export function runCommand(words: string[], client: Client = detachedClient()): Reply {
   const upper = words[0].toUpperCase();
   const command = Object.hasOwn(commands, upper) ? commands[upper] : undefined;
+  if (client.transaction && !RUN_DURING_MULTI.has(upper)) return queue(words, client.transaction);
 
   // Like Redis: before running a command, evict until memory is under the
   // limit. If that isn't possible (noeviction), refuse commands that add data.
@@ -81,7 +90,37 @@ function evictIfNeeded(): void {
   }
 }
 
-function execute(words: string[], client: Client): Reply {
+// ---- Transactions ----
+
+// A command sent between MULTI and EXEC is checked (does it exist? right
+// number of arguments?) and queued. If the check fails, the client gets the
+// error now and EXEC will refuse the whole transaction, like Redis.
+function queue(words: string[], transaction: NonNullable<Client["transaction"]>): Reply {
+  const problem = checkCommand(words);
+  if (problem) {
+    transaction.failed = true;
+    return problem;
+  }
+  transaction.queue.push(words);
+  return { simple: "QUEUED" };
+}
+
+// Runs the queued commands one after another. Nothing else can run in between:
+// this is all one synchronous call on the single thread, so the transaction
+// is atomic without any locking. A command that fails while running (say,
+// WRONGTYPE) doesn't stop the others; its error is just one of the replies.
+function exec(client: Client): Reply {
+  const transaction = client.transaction;
+  if (!transaction) return { error: "ERR EXEC without MULTI" };
+  client.transaction = null;
+  if (transaction.failed) return { error: "EXECABORT Transaction discarded because of previous errors." };
+  return transaction.queue.map((words) => runCommand(words, client));
+}
+
+// ---- Running one command ----
+
+// The error for an unknown command or the wrong number of arguments, if any.
+function checkCommand(words: string[]): Reply | null {
   const [name, ...args] = words;
   const upper = name.toUpperCase();
   if (!Object.hasOwn(commands, upper)) {
@@ -90,7 +129,15 @@ function execute(words: string[], client: Client): Reply {
   }
   const command = commands[upper];
   const ok = command.arity > 0 ? words.length === command.arity : words.length >= -command.arity;
-  if (!ok) return wrongArgs(name.toLowerCase());
+  return ok ? null : wrongArgs(name.toLowerCase());
+}
+
+function execute(words: string[], client: Client): Reply {
+  const problem = checkCommand(words);
+  if (problem) return problem;
+  const [name, ...args] = words;
+  const upper = name.toUpperCase();
+  const command = commands[upper];
   if (client.subscriptions.size > 0 && !ALLOWED_WHILE_SUBSCRIBED.has(upper)) {
     return {
       error: `ERR Can't execute '${name.toLowerCase()}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context`,

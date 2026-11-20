@@ -10,10 +10,13 @@ export interface Client {
   closeAfterReply: boolean;
   // Channels this client is subscribed to (see pubsub.ts).
   subscriptions: Set<string>;
+  // Between MULTI and EXEC: the queued commands, and whether one of them was
+  // rejected while queuing (then EXEC refuses to run any of them).
+  transaction: { queue: string[][]; failed: boolean } | null;
 }
 
 export function createClient(send: (reply: Reply) => void): Client {
-  return { send, closeAfterReply: false, subscriptions: new Set() };
+  return { send, closeAfterReply: false, subscriptions: new Set(), transaction: null };
 }
 
 // For commands that don't come from a connection: AOF replay, benchmarks, tests.
