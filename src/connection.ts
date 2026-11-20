@@ -2,7 +2,7 @@ import type { Socket } from "node:net";
 import { parse, ProtocolError } from "./resp/parser.js";
 import { encode } from "./resp/encoder.js";
 import { runCommand } from "./commands/index.js";
-import type { Client } from "./client.js";
+import { createClient } from "./client.js";
 import * as pubsub from "./pubsub.js";
 
 // A subscriber that stops reading makes published messages pile up in this
@@ -20,14 +20,10 @@ export function handleConnection(socket: Socket): void {
   let leftovers = Buffer.alloc(0);
   let overSoftLimitSince: number | null = null;
 
-  const client: Client = {
-    send: (reply) => {
-      socket.write(encode(reply));
-      if (client.subscriptions.size > 0) checkSubscriberBacklog();
-    },
-    closeAfterReply: false,
-    subscriptions: new Set(),
-  };
+  const client = createClient((reply) => {
+    socket.write(encode(reply));
+    if (client.subscriptions.size > 0) checkSubscriberBacklog();
+  });
 
   // socket.writableLength: bytes written but not yet taken by the network.
   function checkSubscriberBacklog(): void {

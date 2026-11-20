@@ -2,7 +2,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { runCommand, onWrite } from "./commands/index.js";
 import { encode, type Reply } from "./resp/encoder.js";
-import type { Client } from "./client.js";
+import { createClient } from "./client.js";
 import * as pubsub from "./pubsub.js";
 import * as store from "./store.js";
 
@@ -14,7 +14,7 @@ beforeEach(() => {
 // A pretend connection that records everything sent to it outside its own replies.
 function fakeClient() {
   const received: Reply[] = [];
-  const client: Client = { send: (reply) => received.push(reply), closeAfterReply: false, subscriptions: new Set() };
+  const client = createClient((reply) => received.push(reply));
   const run = (...words: string[]) => runCommand(words, client);
   return { client, received, run };
 }

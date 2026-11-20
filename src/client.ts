@@ -12,7 +12,11 @@ export interface Client {
   subscriptions: Set<string>;
 }
 
+export function createClient(send: (reply: Reply) => void): Client {
+  return { send, closeAfterReply: false, subscriptions: new Set() };
+}
+
 // For commands that don't come from a connection: AOF replay, benchmarks, tests.
 export function detachedClient(): Client {
-  return { send: () => {}, closeAfterReply: false, subscriptions: new Set() };
+  return createClient(() => {});
 }
