@@ -111,3 +111,62 @@ test("WRONGTYPE comes back as a rejected promise", async () => {
   await redis.rpush("queue", "a");
   await assert.rejects(redis.get("queue"), /^ReplyError: WRONGTYPE/);
 });
+
+// ---- Pub/sub: a second connection subscribes, the main one publishes ----
+
+function newClient() {
+  return new Redis({ port: (server.address() as AddressInfo).port, host: "127.0.0.1" });
+}
+
+test("pub/sub: a subscriber receives what's published, in order", async () => {
+  const subscriber = newClient();
+  try {
+    assert.equal(await subscriber.subscribe("news", "sport"), 2);
+    const messages: [string, string][] = [];
+    const allArrived = new Promise<void>((resolve) => {
+      subscriber.on("message", (channel: string, message: string) => {
+        messages.push([channel, message]);
+        if (messages.length === 3) resolve();
+      });
+    });
+
+    assert.equal(await redis.publish("news", "first"), 1);
+    assert.equal(await redis.publish("sport", "second"), 1);
+    assert.equal(await redis.publish("weather", "nobody listening"), 0);
+    assert.equal(await redis.publish("news", "line one\r\nline two"), 1); // binary-safe
+    await allArrived;
+    assert.deepEqual(messages, [
+      ["news", "first"],
+      ["sport", "second"],
+      ["news", "line one\r\nline two"],
+    ]);
+  } finally {
+    subscriber.disconnect();
+  }
+});
+
+test("pub/sub: unsubscribing stops delivery", async () => {
+  const subscriber = newClient();
+  try {
+    await subscriber.subscribe("news");
+    assert.equal(await redis.publish("news", "x"), 1);
+    await subscriber.unsubscribe("news");
+    assert.equal(await redis.publish("news", "x"), 0);
+  } finally {
+    subscriber.disconnect();
+  }
+});
+
+test("pub/sub: a subscriber that disconnects is removed from its channels", async () => {
+  const subscriber = newClient();
+  await subscriber.subscribe("news");
+  assert.equal(await redis.publish("news", "x"), 1);
+  subscriber.disconnect();
+  // The server notices the closed socket asynchronously; give it a moment.
+  let receivers = 1;
+  for (let attempt = 0; attempt < 50 && receivers > 0; attempt++) {
+    await sleep(10);
+    receivers = await redis.publish("news", "x");
+  }
+  assert.equal(receivers, 0);
+});
