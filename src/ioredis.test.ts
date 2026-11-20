@@ -18,7 +18,7 @@ before(async () => {
 });
 
 after(async () => {
-  await redis.quit().catch(() => redis.disconnect()); // QUIT isn't a Pebble command yet
+  assert.equal(await redis.quit(), "OK");
   server.close();
 });
 

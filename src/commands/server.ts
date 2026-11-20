@@ -42,6 +42,15 @@ export const serverCommands: Record<string, Command> = {
   },
   ECHO: { arity: 2, run: ([message]) => message },
 
+  // QUIT -> OK, then the server closes the connection.
+  QUIT: {
+    arity: -1,
+    run: (_args, client) => {
+      client.closeAfterReply = true;
+      return OK;
+    },
+  },
+
   // INFO [section ...] -> "# Section\r\nfield:value\r\n..." as one bulk string.
   // Clients like ioredis send INFO on connect and wait until "loading:0".
   INFO: {

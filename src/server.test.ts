@@ -53,3 +53,12 @@ test("invalid input gets an error, then the server hangs up", async () => {
   assert.match(reply, /^-ERR Protocol error/);
   close();
 });
+
+test("QUIT replies OK, closes the connection, and ignores what came after it", async () => {
+  const { client, receive, close } = await connect();
+  client.write("*1\r\n$4\r\nQUIT\r\n*1\r\n$4\r\nPING\r\n");
+  const reply = await receive(5);
+  await once(client, "end");
+  assert.equal(reply, "+OK\r\n"); // no +PONG
+  close();
+});

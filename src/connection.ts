@@ -14,6 +14,7 @@ export function handleConnection(socket: Socket): void {
   };
 
   socket.on("data", (chunk) => {
+    if (client.closeAfterReply) return; // after QUIT, ignore anything else sent
     leftovers = Buffer.concat([leftovers, chunk]);
     try {
       let result;
@@ -21,6 +22,10 @@ export function handleConnection(socket: Socket): void {
         leftovers = leftovers.subarray(result.used);
         if (result.words.length === 0) continue; // "*0\r\n": nothing to run
         client.send(runCommand(result.words, client));
+        if (client.closeAfterReply) {
+          socket.end(); // QUIT: close once the reply has been sent
+          return;
+        }
       }
     } catch (err) {
       if (!(err instanceof ProtocolError)) throw err;
