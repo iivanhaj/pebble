@@ -4,6 +4,7 @@ import { encode } from "./resp/encoder.js";
 import { runCommand } from "./commands/index.js";
 import { createClient } from "./client.js";
 import * as pubsub from "./pubsub.js";
+import * as watch from "./watch.js";
 
 // A subscriber that stops reading makes published messages pile up in this
 // process's memory, waiting to be sent. Like Redis's defaults
@@ -67,5 +68,6 @@ export function handleConnection(socket: Socket): void {
 
   socket.on("close", () => {
     pubsub.unsubscribeAll(client); // otherwise PUBLISH would keep writing to a dead socket
+    watch.unwatchAll(client);
   });
 }

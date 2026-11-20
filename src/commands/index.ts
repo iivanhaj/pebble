@@ -4,6 +4,7 @@ import type { Reply } from "../resp/encoder.js";
 import { type Client, detachedClient } from "../client.js";
 import * as store from "../store.js";
 import * as eviction from "../eviction.js";
+import * as watch from "../watch.js";
 import { type Command, WrongTypeError, wrongArgs } from "./shared.js";
 import { serverCommands } from "./server.js";
 export { onSave } from "./server.js";
@@ -30,7 +31,7 @@ const commands: Record<string, Command> = {
 };
 
 // Inside MULTI, every command is queued except these, which act right away.
-const RUN_DURING_MULTI = new Set(["EXEC", "DISCARD", "MULTI", "QUIT"]);
+const RUN_DURING_MULTI = new Set(["EXEC", "DISCARD", "MULTI", "WATCH", "QUIT"]);
 
 // Once a client has subscribed to a channel, it's in "subscribed mode" and can
 // only use these until it unsubscribes from everything (RESP2's rule).
@@ -61,16 +62,21 @@ export function runCommand(words: string[], client: Client = detachedClient()): 
   let reply: Reply;
   try {
     reply = execute(words, client);
+    // Every key a successful write touched counts as changed, for WATCH.
+    if (command?.write && !isError(reply)) for (const key of store.touchedKeys()) watch.keyModified(key);
   } finally {
     store.settle(); // update the memory estimate for the keys this command touched
   }
 
-  const failed = reply !== null && typeof reply === "object" && "error" in reply;
-  if (writeListener && command?.write && !failed) {
+  if (writeListener && command?.write && !isError(reply)) {
     const toRecord = command.toAof ? command.toAof(words.slice(1), reply) : [words];
     if (toRecord.length > 0) writeListener(toRecord);
   }
   return reply;
+}
+
+function isError(reply: Reply): boolean {
+  return reply !== null && typeof reply === "object" && "error" in reply;
 }
 
 const OOM: Reply = { error: "OOM command not allowed when used memory > 'maxmemory'." };
@@ -113,7 +119,10 @@ function exec(client: Client): Reply {
   const transaction = client.transaction;
   if (!transaction) return { error: "ERR EXEC without MULTI" };
   client.transaction = null;
+  const watchedKeyChanged = client.watchedKeyChanged;
+  watch.unwatchAll(client); // EXEC always ends the watch, whether it runs or not
   if (transaction.failed) return { error: "EXECABORT Transaction discarded because of previous errors." };
+  if (watchedKeyChanged) return { nullArray: true }; // someone changed a WATCHed key: nothing runs
   return transaction.queue.map((words) => runCommand(words, client));
 }
 

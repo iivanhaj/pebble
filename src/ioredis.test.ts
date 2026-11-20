@@ -170,3 +170,33 @@ test("pub/sub: a subscriber that disconnects is removed from its channels", asyn
   }
   assert.equal(receivers, 0);
 });
+
+// ---- Transactions ----
+
+test("transactions: MULTI/EXEC through ioredis", async () => {
+  const results = await redis.multi().set("a", "1").incr("a").rpush("l", "x").exec();
+  assert.deepEqual(results, [
+    [null, "OK"],
+    [null, 2],
+    [null, 1],
+  ]);
+});
+
+test("transactions: WATCH makes EXEC return null when another client changed the key", async () => {
+  const other = newClient();
+  try {
+    await redis.set("balance", "100");
+    await redis.watch("balance");
+    await other.set("balance", "50");
+    const results = await redis.multi().set("balance", "90").exec();
+    assert.equal(results, null);
+    assert.equal(await redis.get("balance"), "50");
+  } finally {
+    other.disconnect();
+  }
+});
+
+test("transactions: a queuing error makes the whole EXEC fail", async () => {
+  await assert.rejects(redis.multi().set("a", "1").call("NOPE").exec(), /EXECABORT/);
+  assert.equal(await redis.exists("a"), 0);
+});

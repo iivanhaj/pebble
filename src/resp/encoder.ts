@@ -7,6 +7,7 @@
 //   ["a", "b"]          array         *2\r\n$1\r\na\r\n$1\r\nb\r\n
 //   { simple: "OK" }    simple string +OK\r\n
 //   { error: "ERR x" }  error         -ERR x\r\n
+//   { nullArray: true } null array  *-1\r\n           (EXEC when a WATCHed key changed)
 //   { sequence: [a, b] } a then b, as two separate replies to one command
 //                        (SUBSCRIBE a b confirms each channel separately)
 export type Reply =
@@ -17,6 +18,7 @@ export type Reply =
   | Reply[]
   | { simple: string }
   | { sequence: Reply[] }
+  | { nullArray: true }
   | { error: string };
 
 export function encode(reply: Reply): Buffer {
@@ -30,5 +32,6 @@ function toResp(reply: Reply): string {
   if (Array.isArray(reply)) return `*${reply.length}\r\n${reply.map(toResp).join("")}`;
   if ("simple" in reply) return `+${reply.simple}\r\n`;
   if ("sequence" in reply) return reply.sequence.map(toResp).join("");
+  if ("nullArray" in reply) return "*-1\r\n";
   return `-${reply.error}\r\n`;
 }

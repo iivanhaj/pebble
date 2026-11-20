@@ -13,10 +13,20 @@ export interface Client {
   // Between MULTI and EXEC: the queued commands, and whether one of them was
   // rejected while queuing (then EXEC refuses to run any of them).
   transaction: { queue: string[][]; failed: boolean } | null;
+  // Keys this client is WATCHing, and whether one has changed since (see watch.ts).
+  watching: Set<string>;
+  watchedKeyChanged: boolean;
 }
 
 export function createClient(send: (reply: Reply) => void): Client {
-  return { send, closeAfterReply: false, subscriptions: new Set(), transaction: null };
+  return {
+    send,
+    closeAfterReply: false,
+    subscriptions: new Set(),
+    transaction: null,
+    watching: new Set(),
+    watchedKeyChanged: false,
+  };
 }
 
 // For commands that don't come from a connection: AOF replay, benchmarks, tests.

@@ -47,3 +47,7 @@ test("a sequence is several replies back to back", () => {
   assert.equal(resp({ sequence: [{ simple: "OK" }, 1, ["a"]] }), "+OK\r\n:1\r\n*1\r\n$1\r\na\r\n");
   assert.equal(resp({ sequence: [] }), "");
 });
+
+test("null array (EXEC refused because a WATCHed key changed)", () => {
+  assert.equal(resp({ nullArray: true }), "*-1\r\n");
+});

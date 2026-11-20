@@ -1,6 +1,7 @@
 import { RandomKeySet } from "./random-key-set.js";
 import { type Value, sizeOf } from "./values.js";
 import * as eviction from "./eviction.js";
+import * as watch from "./watch.js";
 
 export type { Value };
 
@@ -131,6 +132,11 @@ export function settle(): void {
   touched.clear();
 }
 
+// Keys read or written by the command running now (cleared by settle()).
+export function touchedKeys(): ReadonlySet<string> {
+  return touched;
+}
+
 // Estimated bytes used by all keys (as of the last settle()).
 export function usedMemory(): number {
   return usedBytes;
@@ -197,7 +203,9 @@ function remove(key: string): boolean {
   usedBytes -= sizes.get(key) ?? 0;
   sizes.delete(key);
   eviction.forget(key);
-  return values.delete(key);
+  const existed = values.delete(key);
+  if (existed) watch.keyModified(key); // DEL, expiry or eviction: WATCHers must know
+  return existed;
 }
 
 function forgetExpiry(key: string): boolean {
