@@ -41,25 +41,32 @@ export function handleConnection(socket: Socket): void {
     }
   }
 
+  // Replies to every command in one chunk of input are collected and sent with
+  // a single write, like Redis does. Each socket.write is a trip into the OS;
+  // with 16 pipelined commands, writing each reply separately was where most
+  // of the server's time went (see docs/ARCHITECTURE.md, "Performance").
   socket.on("data", (chunk) => {
     if (client.closeAfterReply) return; // after QUIT, ignore anything else sent
     leftovers = Buffer.concat([leftovers, chunk]);
+    const replies: Buffer[] = [];
     try {
       let result;
       while ((result = parse(leftovers)) !== null) {
         leftovers = leftovers.subarray(result.used);
         if (result.words.length === 0) continue; // "*0\r\n": nothing to run
-        client.send(runCommand(result.words, client));
-        if (client.closeAfterReply) {
-          socket.end(); // QUIT: close once the reply has been sent
-          return;
-        }
+        replies.push(encode(runCommand(result.words, client)));
+        if (client.closeAfterReply) break; // QUIT: nothing after it runs
       }
     } catch (err) {
       if (!(err instanceof ProtocolError)) throw err;
       // Like Redis: report the bad input, then hang up.
-      socket.end(encode({ error: `ERR ${err.message}` }));
+      replies.push(encode({ error: `ERR ${err.message}` }));
+      client.closeAfterReply = true;
     }
+
+    if (replies.length > 0) socket.write(replies.length === 1 ? replies[0] : Buffer.concat(replies));
+    if (client.closeAfterReply) socket.end(); // close once the replies have been sent
+    else if (client.subscriptions.size > 0) checkSubscriberBacklog();
   });
 
   socket.on("error", () => {
