@@ -258,6 +258,42 @@ disconnected when more than 32 MB is waiting, or more than 8 MB for over 60
 seconds. A test pauses a real subscriber socket and publishes 1 MB messages
 until it's dropped. Ordinary clients have no limit, as in Redis.
 
+## Transactions
+
+**MULTI / EXEC / DISCARD.** After `MULTI`, a client's commands are queued
+(each replies `QUEUED`) instead of run. `EXEC` runs them all and returns every
+reply; `DISCARD` throws them away. EXEC runs the queue in one synchronous call
+on the single thread, so no other client's command can land in between: the
+transaction is atomic without any locks. Like Redis:
+
+- A command rejected while queuing (unknown, wrong number of arguments) is
+  reported right away, and `EXEC` then refuses the whole transaction with
+  `EXECABORT`.
+- A command that fails while running (say, `WRONGTYPE`) doesn't stop the
+  others; its error is just one of the replies. There's no rollback.
+
+**WATCH: optimistic locking.** `WATCH key` before `MULTI` means: if anyone
+changes this key before my `EXEC`, don't run anything (`EXEC` replies nil) and
+I'll retry. Nobody ever waits for a lock; the cost is a retry when two clients
+collide. `watch.ts` maps each key to the clients watching it, and flags them
+when it changes. Changes are reported from two places, so none are missed:
+
+- `runCommand`, for every key a successful write command touched (this
+  catches lists, hashes and sets changed in place, which the store can't see);
+- the store, whenever it removes a key (`DEL`, expiry, eviction).
+
+That's deliberately cautious: a write that touched a key without changing it
+(a `SET NX` that didn't set) still counts, so the worst case is an unneeded
+retry, never a missed change. Every `EXEC` (whether it ran or not), `DISCARD`
+and `UNWATCH` ends the watch.
+
+**Transactions in the AOF.** While `EXEC` runs, its writes are collected and
+recorded as one block, `MULTI`, the commands, `EXEC`, written in one go. The
+loader replays the file as a single client, so the block replays as a
+transaction. If the file ends inside a block (crashed mid-write), the loader
+cuts it back to before the `MULTI`: the transaction is either all there or
+not at all.
+
 ## Files
 
 ```
@@ -268,11 +304,12 @@ src/
   connection.ts          leftovers buffer + parse/run/reply loop, subscriber limits
   client.ts              the connection a command came from
   pubsub.ts              channel -> listening clients; PUBLISH fan-out
+  watch.ts               WATCH: key -> watching clients; flags them on change
   resp/parser.ts         bytes → ["SET", "name", "Jahnavi"]
   resp/encoder.ts        "OK" → "+OK\r\n"
-  commands/index.ts      the command table, runCommand, onWrite, eviction check
+  commands/index.ts      the command table, runCommand, onWrite, eviction check, EXEC
   commands/shared.ts     command type, errors, typed getters
-  commands/*.ts          server, keys, strings, lists, hashes, sets, pubsub
+  commands/*.ts          server, keys, strings, lists, hashes, sets, pubsub, transactions
   store.ts               the notebook Map, expiry, memory estimate
   values.ts              list/hash/set types that count their bytes; sizeOf
   deque.ts               circular buffer used for lists
@@ -285,5 +322,4 @@ src/
   bench/eviction-bench.ts  hit rate and memory comparison of the policies
 ```
 
-Later milestones (transactions)
-add new files beside these without changing their shape.
+Next: benchmarks against real Redis with `redis-benchmark`.

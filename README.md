@@ -68,6 +68,7 @@ OK
 | Hashes     | `HSET`, `HGET`, `HGETALL`, `HDEL`                             |
 | Sets       | `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`                       |
 | Pub/sub    | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`                         |
+| Transactions | `MULTI`, `EXEC`, `DISCARD`, `WATCH`, `UNWATCH`              |
 
 Replies and error messages match real Redis, so existing client libraries
 work unchanged.
@@ -113,6 +114,12 @@ flowchart LR
   with Redis's subscribed-mode rules. Subscribers that stop reading are
   disconnected once too much piles up for them (Redis's 32 MB / 8 MB-for-60s
   limits), so one stuck client can't eat the server's memory.
+- **Transactions and optimistic locking.** `MULTI`/`EXEC` run a batch with no
+  other client's command in between, with no locks needed on one thread.
+  `WATCH` makes `EXEC` refuse if another client changed a key in the meantime,
+  so the client retries instead of anyone waiting on a lock. In the AOF, a
+  transaction is written as one `MULTI ... EXEC` block, and one cut off by a
+  crash is dropped whole on restart.
 
 More detail, including the design decisions, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -123,7 +130,7 @@ More detail, including the design decisions, is in
 npm test
 ```
 
-165 tests: unit tests for the parser, encoder and every command; end-to-end
+188 tests: unit tests for the parser, encoder and every command; end-to-end
 tests over a real TCP connection (including a command split across packets);
 tests that drive Pebble with the real `ioredis` client; and a crash test that
 `kill -9`s a running server under load and restarts it. They run on every push
@@ -144,7 +151,7 @@ npm run bench:eviction   # hit rate and memory cost of each eviction policy
 - [ ] Non-blocking snapshots, without `fork()`
 - [x] Memory limit with LRU eviction: exact LRU and Redis-style sampled LRU, compared
 - [x] Pub/sub, with Redis's subscribed mode and slow-subscriber limits
-- [ ] Transactions: `MULTI` / `EXEC` / `WATCH`
+- [x] Transactions: `MULTI` / `EXEC` / `DISCARD` / `WATCH`, all-or-nothing in the AOF
 - [ ] Benchmarks against real Redis with `redis-benchmark`
 
 ## License
