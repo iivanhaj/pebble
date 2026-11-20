@@ -1,6 +1,7 @@
 // The command table: every command's name -> how many arguments it takes and
 // the function that runs it. Each file in this folder holds one group.
 import type { Reply } from "../resp/encoder.js";
+import { type Client, detachedClient } from "../client.js";
 import * as store from "../store.js";
 import * as eviction from "../eviction.js";
 import { type Command, WrongTypeError, wrongArgs } from "./shared.js";
@@ -30,7 +31,9 @@ export function onWrite(listener: WriteListener | null): void {
   writeListener = listener;
 }
 
-export function runCommand(words: string[]): Reply {
+// `client` is the connection the command came from; commands that don't come
+// from one (AOF replay, tests) get a detached client.
+export function runCommand(words: string[], client: Client = detachedClient()): Reply {
   const upper = words[0].toUpperCase();
   const command = Object.hasOwn(commands, upper) ? commands[upper] : undefined;
 
@@ -42,7 +45,7 @@ export function runCommand(words: string[]): Reply {
   }
   let reply: Reply;
   try {
-    reply = execute(words);
+    reply = execute(words, client);
   } finally {
     store.settle(); // update the memory estimate for the keys this command touched
   }
@@ -72,7 +75,7 @@ function evictIfNeeded(): void {
   }
 }
 
-function execute(words: string[]): Reply {
+function execute(words: string[], client: Client): Reply {
   const [name, ...args] = words;
   const upper = name.toUpperCase();
   if (!Object.hasOwn(commands, upper)) {
@@ -84,7 +87,7 @@ function execute(words: string[]): Reply {
   if (!ok) return wrongArgs(name.toLowerCase());
 
   try {
-    return command.run(args);
+    return command.run(args, client);
   } catch (err) {
     if (err instanceof WrongTypeError) {
       return { error: "WRONGTYPE Operation against a key holding the wrong kind of value" };

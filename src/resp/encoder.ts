@@ -7,6 +7,8 @@
 //   ["a", "b"]          array         *2\r\n$1\r\na\r\n$1\r\nb\r\n
 //   { simple: "OK" }    simple string +OK\r\n
 //   { error: "ERR x" }  error         -ERR x\r\n
+//   { sequence: [a, b] } a then b, as two separate replies to one command
+//                        (SUBSCRIBE a b confirms each channel separately)
 export type Reply =
   | string
   | number
@@ -14,6 +16,7 @@ export type Reply =
   | null
   | Reply[]
   | { simple: string }
+  | { sequence: Reply[] }
   | { error: string };
 
 export function encode(reply: Reply): Buffer {
@@ -26,5 +29,6 @@ function toResp(reply: Reply): string {
   if (typeof reply === "number" || typeof reply === "bigint") return `:${reply}\r\n`;
   if (Array.isArray(reply)) return `*${reply.length}\r\n${reply.map(toResp).join("")}`;
   if ("simple" in reply) return `+${reply.simple}\r\n`;
+  if ("sequence" in reply) return reply.sequence.map(toResp).join("");
   return `-${reply.error}\r\n`;
 }

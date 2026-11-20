@@ -42,3 +42,8 @@ test("non-ASCII bytes round-trip with the byte length, not the character count",
 test("BigInt integers beyond JS's safe range", () => {
   assert.equal(resp(9223372036854775807n), ":9223372036854775807\r\n");
 });
+
+test("a sequence is several replies back to back", () => {
+  assert.equal(resp({ sequence: [{ simple: "OK" }, 1, ["a"]] }), "+OK\r\n:1\r\n*1\r\n$1\r\na\r\n");
+  assert.equal(resp({ sequence: [] }), "");
+});

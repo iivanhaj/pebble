@@ -1,4 +1,5 @@
 import type { Reply } from "../resp/encoder.js";
+import type { Client } from "../client.js";
 import * as store from "../store.js";
 import { StringList, StringHash, StringSet } from "../values.js";
 
@@ -14,7 +15,7 @@ export type Command = {
   arity: number;
   write?: boolean;
   denyoom?: boolean;
-  run: (args: string[]) => Reply;
+  run: (args: string[], client: Client) => Reply;
   toAof?: (args: string[], reply: Reply) => string[][];
 };
 

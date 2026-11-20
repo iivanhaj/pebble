@@ -2,11 +2,16 @@ import type { Socket } from "node:net";
 import { parse, ProtocolError } from "./resp/parser.js";
 import { encode } from "./resp/encoder.js";
 import { runCommand } from "./commands/index.js";
+import type { Client } from "./client.js";
 
 // One per client. Keeps the bytes that haven't made a whole command yet, and
 // runs every whole command as soon as it has arrived.
 export function handleConnection(socket: Socket): void {
   let leftovers = Buffer.alloc(0);
+  const client: Client = {
+    send: (reply) => socket.write(encode(reply)),
+    closeAfterReply: false,
+  };
 
   socket.on("data", (chunk) => {
     leftovers = Buffer.concat([leftovers, chunk]);
@@ -15,7 +20,7 @@ export function handleConnection(socket: Socket): void {
       while ((result = parse(leftovers)) !== null) {
         leftovers = leftovers.subarray(result.used);
         if (result.words.length === 0) continue; // "*0\r\n": nothing to run
-        socket.write(encode(runCommand(result.words)));
+        client.send(runCommand(result.words, client));
       }
     } catch (err) {
       if (!(err instanceof ProtocolError)) throw err;
