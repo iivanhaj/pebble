@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { encode } from "../resp/encoder.js";
 import { parse, ProtocolError } from "../resp/parser.js";
 import { runCommand } from "../commands/index.js";
+import { detachedClient } from "../client.js";
 import * as store from "../store.js";
 
 export type LoadResult = { commands: number; truncatedBytes: number };
@@ -13,7 +14,9 @@ export type LoadResult = { commands: number; truncatedBytes: number };
 //
 // If the file ends partway through a command (the server died mid-write), that
 // broken tail is cut off and loading carries on, like Redis's default
-// "aof-load-truncated yes". Anything else unreadable throws: better to refuse
+// "aof-load-truncated yes". The same goes for a transaction whose MULTI was
+// written but not its EXEC: the whole transaction is cut off, so it's either
+// all there or not at all. Anything else unreadable throws: better to refuse
 // to start than to guess.
 //
 // `from` skips the start of the file: everything before it is already in the
@@ -27,6 +30,9 @@ export function loadAof(path: string, from = 0): LoadResult {
 
   let pos = from;
   let commands = 0;
+  // One client for the whole file, so MULTI ... EXEC replays as a transaction.
+  const client = detachedClient();
+  let multiStart = { pos: 0, commands: 0 }; // where the open MULTI began, if any
   store.setLoading(true);
   try {
     while (pos < bytes.length) {
@@ -40,7 +46,8 @@ export function loadAof(path: string, from = 0): LoadResult {
         throw err;
       }
       if (result === null) break; // a half-written command at the end
-      const reply = runCommand(result.words);
+      if (result.words[0].toUpperCase() === "MULTI") multiStart = { pos, commands };
+      const reply = runCommand(result.words, client);
       if (reply !== null && typeof reply === "object" && "error" in reply) {
         throw new Error(`Bad AOF ${path} at byte ${pos}: ${result.words[0]} failed: ${reply.error}`);
       }
@@ -51,6 +58,12 @@ export function loadAof(path: string, from = 0): LoadResult {
     store.setLoading(false);
   }
 
+  if (client.transaction) {
+    // The file ends inside a transaction: drop all of it. Its commands were
+    // only queued, never run, so nothing needs undoing.
+    pos = multiStart.pos;
+    commands = multiStart.commands;
+  }
   const truncatedBytes = bytes.length - pos;
   if (truncatedBytes > 0) fs.truncateSync(path, pos);
   return { commands, truncatedBytes };

@@ -4,6 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { AofWriter, loadAof } from "./aof.js";
+import { createClient } from "../client.js";
+import { encode } from "../resp/encoder.js";
 import { parse } from "../resp/parser.js";
 import { runCommand as run, onWrite } from "../commands/index.js";
 import * as store from "../store.js";
@@ -217,4 +219,57 @@ test("appendfsync no: never fsync", (t) => {
   aof.append([["SET", "a", "1"]]);
   aof.close();
   assert.equal(sync.mock.callCount() + background.mock.callCount(), 0);
+});
+
+// ---- Transactions in the AOF ----
+
+test("a transaction is recorded as one MULTI ... EXEC block", () => {
+  const calls: string[][][] = [];
+  onWrite((commands) => calls.push(commands));
+  const client = createClient(() => {});
+  for (const words of [["MULTI"], ["SET", "a", "1"], ["GET", "a"], ["INCR", "a"], ["EXEC"]]) run(words, client);
+  assert.deepEqual(calls, [[["MULTI"], ["SET", "a", "1"], ["INCR", "a"], ["EXEC"]]]); // one call: one write
+});
+
+test("a transaction that changes nothing records nothing", () => {
+  const calls: string[][][] = [];
+  onWrite((commands) => calls.push(commands));
+  const client = createClient(() => {});
+  for (const words of [["MULTI"], ["GET", "a"], ["EXEC"]]) run(words, client);
+  assert.deepEqual(calls, []);
+});
+
+test("restarting replays a transaction", () => {
+  const aof = new AofWriter(file);
+  onWrite((commands) => aof.append(commands));
+  const client = createClient(() => {});
+  for (const words of [["MULTI"], ["SET", "a", "1"], ["INCR", "a"], ["EXEC"]]) run(words, client);
+  onWrite(null);
+  aof.close();
+  store.clear();
+  assert.deepEqual(loadAof(file), { commands: 4, truncatedBytes: 0 });
+  assert.equal(run(["GET", "a"]), "2");
+});
+
+test("a file that ends inside a transaction drops the whole transaction", () => {
+  const multi = [["MULTI"], ["SET", "x", "1"], ["SET", "y", "2"]].map((words) => encode(words));
+  const execBytes = encode(["EXEC"]);
+  const endings = {
+    "EXEC never written": Buffer.concat(multi),
+    "EXEC half-written": Buffer.concat([...multi, execBytes.subarray(0, 5)]),
+  };
+  for (const [name, unfinished] of Object.entries(endings)) {
+    store.clear();
+    fs.rmSync(file, { force: true });
+    const aof = new AofWriter(file);
+    aof.append([["SET", "before", "1"]]);
+    aof.close();
+    const goodSize = fs.statSync(file).size;
+    fs.appendFileSync(file, unfinished);
+
+    assert.deepEqual(loadAof(file), { commands: 1, truncatedBytes: unfinished.length }, name);
+    assert.equal(fs.statSync(file).size, goodSize, name);
+    assert.equal(run(["GET", "before"]), "1", name);
+    assert.equal(run(["EXISTS", "x", "y"]), 0, name); // all or nothing
+  }
 });

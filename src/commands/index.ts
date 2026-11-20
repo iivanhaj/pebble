@@ -46,6 +46,16 @@ export function onWrite(listener: WriteListener | null): void {
   writeListener = listener;
 }
 
+// While EXEC runs, writes are collected here instead, and then reported as
+// one block wrapped in MULTI ... EXEC. The AOF writes the block in one go, and
+// a crash part-way through leaves an unfinished MULTI the loader can drop.
+let transactionWrites: string[][] | null = null;
+
+function record(commands: string[][]): void {
+  if (transactionWrites) transactionWrites.push(...commands);
+  else writeListener?.(commands);
+}
+
 // `client` is the connection the command came from; commands that don't come
 // from one (AOF replay, tests) get a detached client.
 export function runCommand(words: string[], client: Client = detachedClient()): Reply {
@@ -70,7 +80,7 @@ export function runCommand(words: string[], client: Client = detachedClient()): 
 
   if (writeListener && command?.write && !isError(reply)) {
     const toRecord = command.toAof ? command.toAof(words.slice(1), reply) : [words];
-    if (toRecord.length > 0) writeListener(toRecord);
+    if (toRecord.length > 0) record(toRecord);
   }
   return reply;
 }
@@ -92,7 +102,7 @@ function evictIfNeeded(): void {
     if (key === undefined) return; // noeviction, or nothing left
     store.del(key);
     eviction.countEviction();
-    writeListener?.([["DEL", key]]);
+    record([["DEL", key]]);
   }
 }
 
@@ -123,7 +133,15 @@ function exec(client: Client): Reply {
   watch.unwatchAll(client); // EXEC always ends the watch, whether it runs or not
   if (transaction.failed) return { error: "EXECABORT Transaction discarded because of previous errors." };
   if (watchedKeyChanged) return { nullArray: true }; // someone changed a WATCHed key: nothing runs
-  return transaction.queue.map((words) => runCommand(words, client));
+
+  transactionWrites = [];
+  try {
+    return transaction.queue.map((words) => runCommand(words, client));
+  } finally {
+    const writes = transactionWrites;
+    transactionWrites = null;
+    if (writes.length > 0) writeListener?.([["MULTI"], ...writes, ["EXEC"]]);
+  }
 }
 
 // ---- Running one command ----
