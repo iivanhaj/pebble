@@ -61,12 +61,13 @@ OK
 
 | Group      | Commands                                                      |
 |------------|---------------------------------------------------------------|
-| Server     | `PING`, `ECHO`, `INFO`, `DBSIZE`, `SAVE`, `LASTSAVE`          |
+| Server     | `PING`, `ECHO`, `QUIT`, `INFO`, `DBSIZE`, `SAVE`, `LASTSAVE`  |
 | Keys       | `DEL`, `EXISTS`, `EXPIRE`, `PEXPIREAT`, `TTL`, `PERSIST`      |
 | Strings    | `GET`, `SET` (with `EX`, `PX`, `NX`, `XX`), `INCR`, `DECR`, `MGET`, `MSET` |
 | Lists      | `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `LRANGE`                    |
 | Hashes     | `HSET`, `HGET`, `HGETALL`, `HDEL`                             |
 | Sets       | `SADD`, `SREM`, `SMEMBERS`, `SISMEMBER`                       |
+| Pub/sub    | `SUBSCRIBE`, `UNSUBSCRIBE`, `PUBLISH`                         |
 
 Replies and error messages match real Redis, so existing client libraries
 work unchanged.
@@ -108,6 +109,10 @@ flowchart LR
   list) and Redis's sampled LRU. A benchmark with skewed, realistic traffic
   shows sampled LRU gets within 0.4 points of exact LRU's hit rate (73.2% vs
   73.5%) with a third less bookkeeping memory, which is why Redis approximates.
+- **Pub/sub.** `PUBLISH` fans a message out to every subscribed connection,
+  with Redis's subscribed-mode rules. Subscribers that stop reading are
+  disconnected once too much piles up for them (Redis's 32 MB / 8 MB-for-60s
+  limits), so one stuck client can't eat the server's memory.
 
 More detail, including the design decisions, is in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -118,7 +123,7 @@ More detail, including the design decisions, is in
 npm test
 ```
 
-147 tests: unit tests for the parser, encoder and every command; end-to-end
+165 tests: unit tests for the parser, encoder and every command; end-to-end
 tests over a real TCP connection (including a command split across packets);
 tests that drive Pebble with the real `ioredis` client; and a crash test that
 `kill -9`s a running server under load and restarts it. They run on every push
@@ -138,7 +143,7 @@ npm run bench:eviction   # hit rate and memory cost of each eviction policy
 - [x] Point-in-time snapshots (`SAVE`), loaded together with the AOF
 - [ ] Non-blocking snapshots, without `fork()`
 - [x] Memory limit with LRU eviction: exact LRU and Redis-style sampled LRU, compared
-- [ ] Pub/sub
+- [x] Pub/sub, with Redis's subscribed mode and slow-subscriber limits
 - [ ] Transactions: `MULTI` / `EXEC` / `WATCH`
 - [ ] Benchmarks against real Redis with `redis-benchmark`
 

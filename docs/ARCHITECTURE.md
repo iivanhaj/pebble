@@ -226,6 +226,38 @@ nodes. That's why Redis approximates. Random eviction is only ~3.5 points
 behind here because, with a skewed workload, the hot keys get re-added
 quickly after being evicted; less skewed traffic widens the gap.
 
+## Pub/sub
+
+`SUBSCRIBE news` tunes a client in to a channel; `PUBLISH news hello` sends
+`["message", "news", "hello"]` to every client tuned in right now and returns
+how many got it. Nothing is stored: with no listeners, the message is dropped.
+
+This is the first feature where a command isn't just "one request in, one
+reply out", so it needed three pieces of plumbing:
+
+- **Commands know who's asking.** Each command gets the `Client` it came from
+  (`client.ts`): a way to send to that connection, and its subscriptions.
+  Commands from the AOF or tests get a detached client.
+- **One command, several replies.** `SUBSCRIBE a b` confirms each channel
+  separately, as Redis does. A reply can be `{ sequence: [...] }`, which the
+  encoder sends as separate replies back to back.
+- **Sending to other connections.** `pubsub.ts` maps each channel to the set of
+  clients listening; `PUBLISH` calls `send` on each. Each client also keeps its
+  own set of channels, so when its socket closes it's removed from every
+  channel in one go (otherwise `PUBLISH` would keep writing to dead sockets).
+
+**Subscribed mode.** Like Redis with RESP2, once a client subscribes it can
+only use `SUBSCRIBE`, `UNSUBSCRIBE`, `PING` (which then replies
+`["pong", ""]`) and `QUIT`, until it unsubscribes from everything. Anything
+else gets Redis's exact error.
+
+**Slow subscribers.** A subscriber that stops reading makes messages pile up
+in Pebble's memory, waiting to be sent (`socket.writableLength`). With Redis's
+defaults (`client-output-buffer-limit pubsub 32mb 8mb 60`), a subscriber is
+disconnected when more than 32 MB is waiting, or more than 8 MB for over 60
+seconds. A test pauses a real subscriber socket and publishes 1 MB messages
+until it's dropped. Ordinary clients have no limit, as in Redis.
+
 ## Files
 
 ```
@@ -233,12 +265,14 @@ src/
   main.ts                parses settings, starts persistence, then the server
   config.ts              command-line settings (--port, --appendonly, ...)
   server.ts              creates the TCP server, one Connection per client
-  connection.ts          leftovers buffer + parse/run/reply loop
+  connection.ts          leftovers buffer + parse/run/reply loop, subscriber limits
+  client.ts              the connection a command came from
+  pubsub.ts              channel -> listening clients; PUBLISH fan-out
   resp/parser.ts         bytes → ["SET", "name", "Jahnavi"]
   resp/encoder.ts        "OK" → "+OK\r\n"
   commands/index.ts      the command table, runCommand, onWrite, eviction check
   commands/shared.ts     command type, errors, typed getters
-  commands/*.ts          server, keys, strings, lists, hashes, sets
+  commands/*.ts          server, keys, strings, lists, hashes, sets, pubsub
   store.ts               the notebook Map, expiry, memory estimate
   values.ts              list/hash/set types that count their bytes; sizeOf
   deque.ts               circular buffer used for lists
@@ -251,5 +285,5 @@ src/
   bench/eviction-bench.ts  hit rate and memory comparison of the policies
 ```
 
-Later milestones (pub/sub, transactions)
+Later milestones (transactions)
 add new files beside these without changing their shape.
