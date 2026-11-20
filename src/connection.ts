@@ -3,6 +3,7 @@ import { parse, ProtocolError } from "./resp/parser.js";
 import { encode } from "./resp/encoder.js";
 import { runCommand } from "./commands/index.js";
 import type { Client } from "./client.js";
+import * as pubsub from "./pubsub.js";
 
 // One per client. Keeps the bytes that haven't made a whole command yet, and
 // runs every whole command as soon as it has arrived.
@@ -11,6 +12,7 @@ export function handleConnection(socket: Socket): void {
   const client: Client = {
     send: (reply) => socket.write(encode(reply)),
     closeAfterReply: false,
+    subscriptions: new Set(),
   };
 
   socket.on("data", (chunk) => {
@@ -35,6 +37,10 @@ export function handleConnection(socket: Socket): void {
   });
 
   socket.on("error", () => {
-    // Client went away mid-write (e.g. connection reset); nothing to clean up yet.
+    // Client went away mid-write (e.g. connection reset); "close" follows and cleans up.
+  });
+
+  socket.on("close", () => {
+    pubsub.unsubscribeAll(client); // otherwise PUBLISH would keep writing to a dead socket
   });
 }

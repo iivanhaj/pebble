@@ -1,5 +1,6 @@
 import * as store from "../store.js";
 import * as eviction from "../eviction.js";
+import * as pubsub from "../pubsub.js";
 import { type Command, OK, wrongArgs } from "./shared.js";
 
 // SAVE calls this to write a snapshot. Startup code registers it, so commands
@@ -35,8 +36,10 @@ export const serverCommands: Record<string, Command> = {
 
   PING: {
     arity: -1,
-    run: (args) => {
+    run: (args, client) => {
       if (args.length > 1) return wrongArgs("ping");
+      // In subscribed mode, Redis answers PING as ["pong", message].
+      if (client.subscriptions.size > 0) return ["pong", args[0] ?? ""];
       return args.length === 0 ? { simple: "PONG" } : args[0];
     },
   },
@@ -79,7 +82,7 @@ function infoSections(): [string, string[]][] {
       ],
     ],
     ["Persistence", ["loading:0", `rdb_last_save_time:${lastSave}`]], // loading finishes before clients connect
-    ["Stats", [`evicted_keys:${eviction.evictedKeys()}`]],
+    ["Stats", [`evicted_keys:${eviction.evictedKeys()}`, `pubsub_channels:${pubsub.channelCount()}`]],
     ["Keyspace", keys > 0 ? [`db0:keys=${keys},expires=${store.expiringCount()},avg_ttl=0`] : []],
   ];
 }

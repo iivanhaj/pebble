@@ -12,6 +12,7 @@ import { stringCommands } from "./strings.js";
 import { listCommands } from "./lists.js";
 import { hashCommands } from "./hashes.js";
 import { setCommands } from "./sets.js";
+import { pubsubCommands } from "./pubsub.js";
 
 const commands: Record<string, Command> = {
   ...serverCommands,
@@ -20,7 +21,12 @@ const commands: Record<string, Command> = {
   ...listCommands,
   ...hashCommands,
   ...setCommands,
+  ...pubsubCommands,
 };
+
+// Once a client has subscribed to a channel, it's in "subscribed mode" and can
+// only use these until it unsubscribes from everything (RESP2's rule).
+const ALLOWED_WHILE_SUBSCRIBED = new Set(["SUBSCRIBE", "UNSUBSCRIBE", "PING", "QUIT"]);
 
 // Called with the commands to record every time a write command changes data.
 // The AOF listens here; commands don't need to know the AOF exists.
@@ -85,6 +91,11 @@ function execute(words: string[], client: Client): Reply {
   const command = commands[upper];
   const ok = command.arity > 0 ? words.length === command.arity : words.length >= -command.arity;
   if (!ok) return wrongArgs(name.toLowerCase());
+  if (client.subscriptions.size > 0 && !ALLOWED_WHILE_SUBSCRIBED.has(upper)) {
+    return {
+      error: `ERR Can't execute '${name.toLowerCase()}': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context`,
+    };
+  }
 
   try {
     return command.run(args, client);

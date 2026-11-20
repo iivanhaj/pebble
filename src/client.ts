@@ -8,9 +8,11 @@ export interface Client {
   send(reply: Reply): void;
   // Set by QUIT: the connection closes once the reply is sent.
   closeAfterReply: boolean;
+  // Channels this client is subscribed to (see pubsub.ts).
+  subscriptions: Set<string>;
 }
 
 // For commands that don't come from a connection: AOF replay, benchmarks, tests.
 export function detachedClient(): Client {
-  return { send: () => {}, closeAfterReply: false };
+  return { send: () => {}, closeAfterReply: false, subscriptions: new Set() };
 }
