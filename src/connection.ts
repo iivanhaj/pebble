@@ -5,15 +5,44 @@ import { runCommand } from "./commands/index.js";
 import type { Client } from "./client.js";
 import * as pubsub from "./pubsub.js";
 
+// A subscriber that stops reading makes published messages pile up in this
+// process's memory, waiting to be sent. Like Redis's defaults
+// ("client-output-buffer-limit pubsub 32mb 8mb 60"), disconnect a subscriber
+// with more than 32 MB waiting, or more than 8 MB waiting for over 60 seconds.
+// Ordinary clients have no limit, as in Redis.
+export const SUBSCRIBER_HARD_LIMIT = 32 * 1024 * 1024;
+export const SUBSCRIBER_SOFT_LIMIT = 8 * 1024 * 1024;
+export const SUBSCRIBER_SOFT_SECONDS = 60;
+
 // One per client. Keeps the bytes that haven't made a whole command yet, and
 // runs every whole command as soon as it has arrived.
 export function handleConnection(socket: Socket): void {
   let leftovers = Buffer.alloc(0);
+  let overSoftLimitSince: number | null = null;
+
   const client: Client = {
-    send: (reply) => socket.write(encode(reply)),
+    send: (reply) => {
+      socket.write(encode(reply));
+      if (client.subscriptions.size > 0) checkSubscriberBacklog();
+    },
     closeAfterReply: false,
     subscriptions: new Set(),
   };
+
+  // socket.writableLength: bytes written but not yet taken by the network.
+  function checkSubscriberBacklog(): void {
+    const waiting = socket.writableLength;
+    if (waiting <= SUBSCRIBER_SOFT_LIMIT) {
+      overSoftLimitSince = null;
+      return;
+    }
+    overSoftLimitSince ??= Date.now();
+    const tooLong = Date.now() - overSoftLimitSince > SUBSCRIBER_SOFT_SECONDS * 1000;
+    if (waiting > SUBSCRIBER_HARD_LIMIT || tooLong) {
+      pubsub.unsubscribeAll(client); // stop sending to it right away
+      socket.destroy(); // and drop what's waiting
+    }
+  }
 
   socket.on("data", (chunk) => {
     if (client.closeAfterReply) return; // after QUIT, ignore anything else sent
